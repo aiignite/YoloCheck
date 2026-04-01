@@ -195,6 +195,127 @@ def _summarize_pose(segment: list[AnalyzedFrame]) -> dict:
     }
 
 
+def _smooth_object_frequency(object_frequency: dict[str, int], frame_count: int) -> dict[str, float]:
+    if frame_count <= 0:
+        return {}
+    return {
+        name: round(count / frame_count, 3)
+        for name, count in sorted(object_frequency.items())
+    }
+
+
+def _compute_quality_score(
+    avg_conf: float,
+    pose_summary: dict,
+    interaction_summary: dict,
+    avg_scene_change: float,
+    frame_count: int,
+) -> float:
+    if frame_count <= 0:
+        return 0.0
+
+    pose_coverage = min(pose_summary.get("frames_with_pose", 0) / frame_count, 1.0)
+    interaction_coverage = min(interaction_summary.get("frames_with_interaction", 0) / frame_count, 1.0)
+    scene_stability = max(0.0, 1 - min(avg_scene_change / 100, 1.0))
+    quality = (
+        avg_conf * 0.45 +
+        pose_coverage * 0.2 +
+        interaction_coverage * 0.25 +
+        scene_stability * 0.1
+    )
+    return round(min(max(quality, 0.0), 1.0), 3)
+
+
+def _suggest_action_name(primary_object: Optional[str], interaction_summary: dict, step_order: int) -> str:
+    if primary_object and interaction_summary.get("total_interactions", 0) > 0:
+        return f"操作{primary_object}"
+    if primary_object:
+        return f"处理{primary_object}"
+    return f"操作步骤{step_order}"
+
+
+def _build_action_suggestions(
+    suggested_action_name: str,
+    quality_score: float,
+    interaction_summary: dict,
+    avg_scene_change: float,
+) -> list[dict]:
+    suggestions = [{
+        "type": "rename",
+        "message": f"建议动作名为{suggested_action_name}",
+    }]
+
+    if quality_score < 0.7:
+        suggestions.append({
+            "type": "quality",
+            "message": "动作质量偏低，建议检查操作连贯性和检测置信度",
+        })
+
+    if interaction_summary.get("total_interactions", 0) == 0:
+        suggestions.append({
+            "type": "anomaly",
+            "message": "未识别到明显交互，建议确认该步骤是否缺少关键操作",
+        })
+
+    if avg_scene_change > 35:
+        suggestions.append({
+            "type": "stability",
+            "message": "该步骤画面波动较大，建议复核动作边界是否稳定",
+        })
+
+    return suggestions
+
+
+def _build_workflow_summary(actions: list[DetectedAction]) -> tuple[dict, list[dict]]:
+    if not actions:
+        return {}, []
+
+    suggested_names = [
+        action.features.get("suggested_action_name") or action.action_name
+        for action in actions
+    ]
+    quality_scores = [
+        action.features.get("quality_score", 0.0)
+        for action in actions
+    ]
+    workflow_summary = {
+        "dominant_sequence": suggested_names,
+        "quality_score_avg": round(sum(quality_scores) / len(quality_scores), 3),
+        "step_count": len(actions),
+    }
+
+    workflow_suggestions: list[dict] = []
+    low_quality_steps = [
+        action.step_order
+        for action in actions
+        if action.features.get("quality_score", 0.0) < 0.7
+    ]
+    if low_quality_steps:
+        workflow_suggestions.append({
+            "type": "quality",
+            "message": f"第{', '.join(str(step) for step in low_quality_steps)}步质量评分偏低，建议优先复核",
+        })
+
+    anomalous_steps = [
+        action.step_order
+        for action in actions
+        if any(s.get("type") == "anomaly" for s in action.features.get("suggestions", []))
+    ]
+    if anomalous_steps:
+        workflow_suggestions.append({
+            "type": "anomaly",
+            "message": f"第{', '.join(str(step) for step in anomalous_steps)}步缺少明确交互，建议确认流程完整性",
+        })
+
+    if not workflow_suggestions:
+        workflow_suggestions.append({
+            "type": "quality",
+            "message": "当前流程整体稳定，可基于建议动作名进一步整理标准步骤",
+        })
+
+    return workflow_summary, workflow_suggestions
+
+
 def save_keyframe(frame: np.ndarray, template_id: int, session_id: int, frame_number: int) -> str:
     """保存关键帧截图"""
     save_dir = os.path.join(settings.upload_dir, "keyframes", f"template_{template_id}")
@@ -373,6 +494,25 @@ def extract_actions(
             "frames_with_interaction": sum(1 for af in segment if af.interaction_summary.get("interaction_count", 0) > 0),
         }
 
+        avg_scene_change = round(
+            sum(af.scene_change_score for af in segment) / len(segment), 2
+        ) if segment else 0
+        smoothed_object_frequency = _smooth_object_frequency(object_frequency, len(segment))
+        suggested_action_name = _suggest_action_name(primary_object, interaction_summary, seq_idx + 1)
+        quality_score = _compute_quality_score(
+            avg_conf=avg_conf,
+            pose_summary=pose_summary,
+            interaction_summary=interaction_summary,
+            avg_scene_change=avg_scene_change,
+            frame_count=len(segment),
+        )
+        suggestions = _build_action_suggestions(
+            suggested_action_name=suggested_action_name,
+            quality_score=quality_score,
+            interaction_summary=interaction_summary,
+            avg_scene_change=avg_scene_change,
+        )
+
         actions.append(DetectedAction(
             step_order=seq_idx + 1,
             action_name=action_name,
@@ -393,11 +533,13 @@ def extract_actions(
                 "unique_objects": len(objects_list),
                 "primary_object": primary_object,
                 "object_frequency": object_frequency,
+                "smoothed_object_frequency": smoothed_object_frequency,
                 "pose_summary": pose_summary,
                 "interaction_summary": interaction_summary,
-                "avg_scene_change": round(
-                    sum(af.scene_change_score for af in segment) / len(segment), 2
-                ) if segment else 0,
+                "avg_scene_change": avg_scene_change,
+                "quality_score": quality_score,
+                "suggested_action_name": suggested_action_name,
+                "suggestions": suggestions,
             },
         ))
 
@@ -420,6 +562,8 @@ def generate_analysis_summary(
             total_detections += 1
 
     boundary_count = sum(1 for af in analyzed_frames if af.is_boundary)
+
+    workflow_summary, workflow_suggestions = _build_workflow_summary(actions)
 
     return {
         "video": {
@@ -444,7 +588,11 @@ def generate_analysis_summary(
                 "name": a.action_name,
                 "duration": a.duration,
                 "objects": a.objects_in_scene,
+                "quality_score": a.features.get("quality_score", 0.0),
+                "suggested_action_name": a.features.get("suggested_action_name") or a.action_name,
             }
             for a in actions
         ],
+        "workflow_summary": workflow_summary,
+        "workflow_suggestions": workflow_suggestions,
     }

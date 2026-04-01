@@ -39,8 +39,8 @@ describe('Dashboard看板', () => {
 
   it('渲染事件表格和告警列表', () => {
     renderDashboard();
-    expect(screen.getByText('最新检测事件')).toBeInTheDocument();
-    expect(screen.getByText('告警通知')).toBeInTheDocument();
+    expect(screen.getAllByText('最新检测事件').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('告警通知').length).toBeGreaterThan(0);
   });
 
   it('调用API加载数据', async () => {

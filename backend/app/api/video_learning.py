@@ -20,6 +20,9 @@ from app.schemas.video_learning import (
     ActionSequenceUpdate,
     ActionSplitRequest,
     ActionMergeRequest,
+    ActionSuggestionApplyRequest,
+    SOPPreviewResponse,
+    TemplateSOPUpdate,
     TemplateCompareResponse,
 )
 from app.crud import video_learning as crud
@@ -35,6 +38,36 @@ from app.models.models import User
 router = APIRouter()
 settings = get_settings()
 _executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _serialize_action_with_suggestions(action) -> ActionSequenceResponse:
+    response = ActionSequenceResponse.model_validate(action)
+    return response.model_copy(update={
+        "suggestions": (action.features or {}).get("suggestions", []),
+    })
+
+
+def _build_sop_preview(template, actions, workflow_summary: dict) -> dict:
+    steps = []
+    for action in actions:
+        features = action.features or {}
+        steps.append({
+            "step_order": action.step_order,
+            "name": action.user_defined_name or features.get("suggested_action_name") or action.action_name,
+            "description": action.note or action.description,
+            "duration": action.duration,
+            "keyframe_path": action.keyframe_path,
+            "objects": action.objects_in_scene or [],
+        })
+
+    return {
+        "template_id": template.id,
+        "title": template.name,
+        "business_type": template.business_type,
+        "station_id": template.station_id,
+        "workflow_summary": workflow_summary or {},
+        "steps": steps,
+    }
 
 
 # ── 模板管理 ──
@@ -306,7 +339,8 @@ async def get_session(session_id: int, user: User = Depends(require_auth), db: A
 
 @router.get("/sessions/{session_id}/actions", response_model=list[ActionSequenceResponse])
 async def get_session_actions(session_id: int, user: User = Depends(require_auth), db: AsyncSession = Depends(get_db)):
-    return await crud.get_actions_by_session(db, session_id)
+    actions = await crud.get_actions_by_session(db, session_id)
+    return [_serialize_action_with_suggestions(action) for action in actions]
 
 
 @router.put("/actions/{action_id}", response_model=ActionSequenceResponse)
@@ -350,6 +384,19 @@ async def merge_action_sequence(
     return list(actions)
 
 
+@router.post("/actions/{action_id}/apply-suggestion", response_model=ActionSequenceResponse)
+async def apply_action_sequence_suggestion(
+    action_id: int,
+    payload: ActionSuggestionApplyRequest,
+    _user: User = Depends(require_role("manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    action = await crud.apply_action_suggestion(db, action_id, payload.suggestion_type)
+    if not action:
+        raise HTTPException(400, "动作建议采纳失败")
+    return _serialize_action_with_suggestions(action)
+
+
 @router.get("/sessions/{session_id}/keyframes", response_model=list[KeyFrameResponse])
 async def get_session_keyframes(
     session_id: int,
@@ -378,14 +425,55 @@ async def get_learning_summary(template_id: int, user: User = Depends(require_au
     actions = await crud.get_actions_by_session(db, latest.id)
     kf_count = await crud.get_keyframe_count(db, latest.id)
     boundary_count = await crud.get_boundary_count(db, latest.id)
+    analysis_result = latest.analysis_result or {}
+    action_responses = [_serialize_action_with_suggestions(action) for action in actions]
 
     return LearningSummary(
         template=tpl,
         session=latest,
-        actions=actions,
+        actions=action_responses,
+        workflow_summary=analysis_result.get("workflow_summary", {}),
+        workflow_suggestions=analysis_result.get("workflow_suggestions", []),
+        sop_preview=tpl.sop_content or analysis_result.get("sop_preview", {}),
         key_frames_count=kf_count,
         action_boundaries_count=boundary_count,
     )
+
+
+@router.post("/templates/{template_id}/sop-preview", response_model=SOPPreviewResponse)
+async def preview_template_sop(
+    template_id: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    tpl = await crud.get_template(db, template_id)
+    if not tpl:
+        raise HTTPException(404, "模板不存在")
+
+    actions = list(await crud.get_actions_by_template(db, template_id))
+    sessions = await crud.get_sessions_by_template(db, template_id)
+    completed = [s for s in sessions if s.status == "completed"]
+    latest = completed[0] if completed else None
+    workflow_summary = (latest.analysis_result or {}).get("workflow_summary", {}) if latest else {}
+    return _build_sop_preview(tpl, actions, workflow_summary)
+
+
+@router.put("/templates/{template_id}/sop", response_model=VideoTemplateResponse)
+async def save_template_sop(
+    template_id: int,
+    payload: TemplateSOPUpdate,
+    _user: User = Depends(require_role("manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    tpl = await crud.update_template(
+        db,
+        template_id,
+        sop_content=payload.sop_content,
+        workflow_summary=payload.workflow_summary,
+    )
+    if not tpl:
+        raise HTTPException(404, "模板不存在")
+    return tpl
 
 
 @router.get("/templates/{template_id}/compare/{target_template_id}", response_model=TemplateCompareResponse)

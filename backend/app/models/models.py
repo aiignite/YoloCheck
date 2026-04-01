@@ -122,6 +122,8 @@ class VideoTemplate(Base):
     business_type = Column(String(50), index=True)  # assembly / welding / inspection / packaging
     station_id = Column(String(50), index=True)
     learning_config = Column(JSON)  # 默认学习配置
+    sop_content = Column(JSON)  # 结构化SOP内容
+    workflow_summary = Column(JSON)  # 模板级流程摘要
     status = Column(String(20), default="pending")  # pending / analyzing / completed / failed
     created_at = Column(DateTime, default=func.now())
 
