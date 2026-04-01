@@ -1,0 +1,69 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+
+// Mock api before importing components
+vi.mock('../utils/api', () => ({
+  default: {
+    get: vi.fn().mockResolvedValue({ data: [] }),
+    post: vi.fn().mockResolvedValue({ data: {} }),
+    put: vi.fn().mockResolvedValue({ data: {} }),
+    delete: vi.fn().mockResolvedValue({ data: {} }),
+  },
+}));
+
+import { Routes, Route } from 'react-router-dom';
+import MainLayout from '../layouts/MainLayout';
+import Dashboard from '../pages/Dashboard';
+import Cameras from '../pages/Cameras';
+import Alerts from '../pages/Alerts';
+import Statistics from '../pages/Statistics';
+import Settings from '../pages/Settings';
+
+function TestApp({ initialEntry = '/' }: { initialEntry?: string }) {
+  return (
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/" element={<MainLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="cameras" element={<Cameras />} />
+          <Route path="alerts" element={<Alerts />} />
+          <Route path="statistics" element={<Statistics />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+describe('App路由', () => {
+  it('渲染主布局', () => {
+    render(<TestApp />);
+    expect(screen.getByText('YoloCheck 监控')).toBeInTheDocument();
+    expect(screen.getByText('YOLO生产过程学习监控系统')).toBeInTheDocument();
+  });
+
+  it('渲染侧边栏菜单', () => {
+    render(<TestApp />);
+    expect(screen.getByText('实时看板')).toBeInTheDocument();
+    expect(screen.getByText('摄像头管理')).toBeInTheDocument();
+    expect(screen.getByText('告警管理')).toBeInTheDocument();
+    expect(screen.getByText('统计分析')).toBeInTheDocument();
+    expect(screen.getByText('系统设置')).toBeInTheDocument();
+  });
+
+  it('默认路由显示看板页', () => {
+    render(<TestApp />);
+    expect(screen.getByText('今日产量')).toBeInTheDocument();
+  });
+
+  it('导航到摄像头管理页', () => {
+    render(<TestApp initialEntry="/cameras" />);
+    expect(screen.getByText('添加摄像头')).toBeInTheDocument();
+  });
+
+  it('导航到设置页', () => {
+    render(<TestApp initialEntry="/settings" />);
+    expect(screen.getByText('系统配置')).toBeInTheDocument();
+  });
+});
