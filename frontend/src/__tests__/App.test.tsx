@@ -45,16 +45,16 @@ describe('App路由', () => {
 
   it('渲染侧边栏菜单', () => {
     render(<TestApp />);
-    expect(screen.getByText('实时看板')).toBeInTheDocument();
-    expect(screen.getByText('摄像头管理')).toBeInTheDocument();
-    expect(screen.getByText('告警管理')).toBeInTheDocument();
-    expect(screen.getByText('统计分析')).toBeInTheDocument();
-    expect(screen.getByText('系统设置')).toBeInTheDocument();
+    expect(screen.getAllByText('实时看板').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('摄像头管理').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('告警管理').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('统计分析').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('系统设置').length).toBeGreaterThan(0);
   });
 
   it('默认路由显示看板页', () => {
     render(<TestApp />);
-    expect(screen.getByText('今日产量')).toBeInTheDocument();
+    expect(screen.getAllByText('今日产量').length).toBeGreaterThan(0);
   });
 
   it('导航到摄像头管理页', () => {

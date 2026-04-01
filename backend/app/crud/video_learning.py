@@ -148,6 +148,32 @@ async def update_action(db: AsyncSession, action_id: int, **kwargs) -> Optional[
     return action
 
 
+async def apply_action_suggestion(
+    db: AsyncSession,
+    action_id: int,
+    suggestion_type: str,
+) -> Optional[ActionSequence]:
+    result = await db.execute(select(ActionSequence).where(ActionSequence.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        return None
+
+    features = action.features or {}
+    if suggestion_type == "rename":
+        suggested_name = features.get("suggested_action_name")
+        if not suggested_name:
+            return None
+        action.user_defined_name = suggested_name
+    elif suggestion_type == "keep":
+        action.is_kept = True
+    else:
+        return None
+
+    await db.commit()
+    await db.refresh(action)
+    return action
+
+
 async def _reorder_actions(db: AsyncSession, session_id: int):
     actions = await get_actions_by_session(db, session_id)
     for idx, action in enumerate(actions, start=1):

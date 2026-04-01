@@ -24,6 +24,8 @@ interface VideoTemplate {
   business_type: string;
   station_id: string | null;
   learning_config?: Record<string, unknown> | null;
+  sop_content?: Record<string, any> | null;
+  workflow_summary?: Record<string, any> | null;
   status: string;
   created_at: string;
 }
@@ -62,6 +64,7 @@ interface ActionSequence {
   confidence: number | null;
   keyframe_path: string | null;
   objects_in_scene: string[] | null;
+  suggestions?: Array<Record<string, any>> | null;
   features?: Record<string, any> | null;
 }
 
@@ -82,6 +85,7 @@ export default function VideoLearning() {
   const [editingOpen, setEditingOpen] = useState(false);
   const [compareTargetId, setCompareTargetId] = useState<number | null>(null);
   const [compareResult, setCompareResult] = useState<Record<string, any> | null>(null);
+  const [sopPreview, setSopPreview] = useState<Record<string, any> | null>(null);
   const { t } = useTranslation();
 
   const businessTypeOptions = [
@@ -133,8 +137,11 @@ export default function VideoLearning() {
       if (completed) {
         const actRes = await api.get(`/video-learning/sessions/${completed.id}/actions`);
         setActions(actRes.data);
+        const sopRes = await api.post(`/video-learning/templates/${tpl.id}/sop-preview`);
+        setSopPreview(sopRes.data);
       } else {
         setActions([]);
+        setSopPreview(null);
       }
     } catch {
       message.error(t('pages.videoLearning.detailFailed'));
@@ -252,8 +259,26 @@ export default function VideoLearning() {
     }
   };
 
+  const applySuggestion = async (action: ActionSequence, suggestionType: string) => {
+    try {
+      const res = await api.post(`/video-learning/actions/${action.id}/apply-suggestion`, {
+        suggestion_type: suggestionType,
+      });
+      setActions((prev) => prev.map((item) => (item.id === action.id ? { ...item, ...res.data } : item)));
+      message.success(t('pages.videoLearning.suggestionApplied'));
+    } catch {
+      message.error(t('pages.videoLearning.suggestionApplyFailed'));
+    }
+  };
+
   const latestSession = sessions.find((s) => s.status === 'completed') || sessions[0];
   const objectFrequency = latestSession?.analysis_result?.analysis?.object_frequency || {};
+  const workflowSummary = latestSession?.analysis_result?.workflow_summary || selectedTemplate?.workflow_summary || {};
+  const workflowSuggestions = latestSession?.analysis_result?.workflow_suggestions || [];
+  const lowQualityCount = actions.filter((action) => (action.features?.quality_score ?? 0) < 0.7).length;
+  const pendingSuggestions = workflowSuggestions.length + actions.reduce((count, action) => {
+    return count + ((action.suggestions || action.features?.suggestions || []).length);
+  }, 0);
 
   const columns = [
     { title: t('common.name'), dataIndex: 'name', key: 'name' },
@@ -403,6 +428,14 @@ export default function VideoLearning() {
                   )}
 
                   <Card title={t('pages.videoLearning.workbench')} size="small" style={{ marginTop: 16 }}>
+                    <Card size="small" title={t('pages.videoLearning.workflowOverview')} style={{ marginBottom: 16 }}>
+                      <Row gutter={16}>
+                        <Col span={8}><Statistic title={t('pages.videoLearning.workflowStepCount')} value={workflowSummary.step_count ?? actions.length} /></Col>
+                        <Col span={8}><Statistic title={t('pages.videoLearning.lowQualitySteps')} value={lowQualityCount} /></Col>
+                        <Col span={8}><Statistic title={t('pages.videoLearning.pendingSuggestions')} value={pendingSuggestions} /></Col>
+                      </Row>
+                    </Card>
+
                     <Tabs
                       items={[
                         {
@@ -431,6 +464,8 @@ export default function VideoLearning() {
                                       <Space direction="vertical" size={2}>
                                         <span>{action.start_time?.toFixed(1)}s - {action.end_time?.toFixed(1)}s ({action.duration?.toFixed(1)}s)</span>
                                         <span>{action.description}</span>
+                                        <span>{t('pages.videoLearning.qualityScore')}: {action.features?.quality_score ?? '-'}</span>
+                                        {action.features?.suggested_action_name && <span>{t('pages.videoLearning.suggestedActionName')}: {action.features?.suggested_action_name}</span>}
                                         <Space wrap>
                                           {action.objects_in_scene?.map((obj) => <Tag key={obj}>{obj}</Tag>)}
                                         </Space>
@@ -440,6 +475,40 @@ export default function VideoLearning() {
                                 </List.Item>
                               )}
                             />
+                          ),
+                        },
+                        {
+                          key: 'suggestions',
+                          label: t('pages.videoLearning.smartSuggestions'),
+                          children: (
+                            <Space direction="vertical" style={{ width: '100%' }}>
+                              {workflowSuggestions.map((suggestion: Record<string, any>, index: number) => (
+                                <Card key={`workflow-${index}`} size="small" title={t('pages.videoLearning.workflowSuggestion')}>
+                                  <div>{suggestion.message}</div>
+                                </Card>
+                              ))}
+                              {actions.map((action) => {
+                                const suggestions = action.suggestions || action.features?.suggestions || [];
+                                return (
+                                  <Card key={action.id} size="small" title={`${t('pages.videoLearning.step')} ${action.step_order}: ${action.user_defined_name || action.action_name}`}>
+                                    <Space direction="vertical" style={{ width: '100%' }}>
+                                      <div>{t('pages.videoLearning.qualityScore')}: {action.features?.quality_score ?? '-'}</div>
+                                      {suggestions.map((suggestion: Record<string, any>, index: number) => (
+                                        <Card key={`${action.id}-${index}`} size="small" type="inner" title={t('pages.videoLearning.actionSuggestion')}>
+                                          <Space direction="vertical" style={{ width: '100%' }}>
+                                            <div>{suggestion.message}</div>
+                                            <Button size="small" onClick={() => applySuggestion(action, suggestion.type || 'rename')}>
+                                              {t('pages.videoLearning.applySuggestion')}
+                                            </Button>
+                                          </Space>
+                                        </Card>
+                                      ))}
+                                      {suggestions.length === 0 && <div>{t('pages.videoLearning.noSuggestions')}</div>}
+                                    </Space>
+                                  </Card>
+                                );
+                              })}
+                            </Space>
                           ),
                         },
                         {
@@ -505,6 +574,34 @@ export default function VideoLearning() {
                                 </Card>
                               )}
                             </Space>
+                          ),
+                        },
+                        {
+                          key: 'sop',
+                          label: t('pages.videoLearning.sopPreview'),
+                          children: sopPreview ? (
+                            <Space direction="vertical" style={{ width: '100%' }}>
+                              <Card size="small" title={sopPreview.title || t('pages.videoLearning.sopPreview')}>
+                                <Descriptions size="small" column={1}>
+                                  <Descriptions.Item label={t('pages.videoLearning.businessType')}>{sopPreview.business_type}</Descriptions.Item>
+                                  <Descriptions.Item label={t('pages.videoLearning.stationId')}>{sopPreview.station_id || '-'}</Descriptions.Item>
+                                  <Descriptions.Item label={t('pages.videoLearning.workflowStepCount')}>{sopPreview.workflow_summary?.step_count ?? sopPreview.steps?.length ?? 0}</Descriptions.Item>
+                                </Descriptions>
+                              </Card>
+                              {(sopPreview.steps || []).map((step: Record<string, any>) => (
+                                <Card key={step.step_order} size="small" title={`${t('pages.videoLearning.step')} ${step.step_order}: ${step.name}`}>
+                                  <Space direction="vertical" style={{ width: '100%' }}>
+                                    <div>{step.description || '-'}</div>
+                                    <Space wrap>
+                                      {(step.objects || []).map((obj: string) => <Tag key={`${step.step_order}-${obj}`}>{obj}</Tag>)}
+                                    </Space>
+                                    {step.keyframe_path && <div>{step.keyframe_path}</div>}
+                                  </Space>
+                                </Card>
+                              ))}
+                            </Space>
+                          ) : (
+                            <div>{t('pages.videoLearning.noSopPreview')}</div>
                           ),
                         },
                         {

@@ -24,6 +24,8 @@ class VideoTemplateResponse(BaseModel):
     business_type: str
     station_id: Optional[str]
     learning_config: Optional[dict]
+    sop_content: Optional[dict]
+    workflow_summary: Optional[dict]
     status: str
     created_at: datetime
 
@@ -81,6 +83,24 @@ class ActionMergeRequest(BaseModel):
     with_previous: bool = True
 
 
+class ActionSuggestionApplyRequest(BaseModel):
+    suggestion_type: str = Field(..., pattern=r"^(rename|keep)$")
+
+
+class SOPPreviewResponse(BaseModel):
+    template_id: int
+    title: str
+    business_type: str
+    station_id: Optional[str] = None
+    workflow_summary: dict = Field(default_factory=dict)
+    steps: list[dict] = Field(default_factory=list)
+
+
+class TemplateSOPUpdate(BaseModel):
+    sop_content: dict = Field(default_factory=dict)
+    workflow_summary: dict = Field(default_factory=dict)
+
+
 class TemplateCompareResponse(BaseModel):
     source_template_id: int
     target_template_id: int
@@ -108,6 +128,7 @@ class ActionSequenceResponse(BaseModel):
     keyframe_path: Optional[str]
     objects_in_scene: Optional[list]
     features: Optional[dict]
+    suggestions: list[dict] = Field(default_factory=list)
     user_defined_name: Optional[str]
     note: Optional[str]
     is_kept: bool
@@ -140,5 +161,8 @@ class LearningSummary(BaseModel):
     session: LearningSessionResponse
     actions: list[ActionSequenceResponse]
     compare_summary: Optional[dict] = None
+    workflow_summary: dict = Field(default_factory=dict)
+    workflow_suggestions: list[dict] = Field(default_factory=list)
+    sop_preview: dict = Field(default_factory=dict)
     key_frames_count: int
     action_boundaries_count: int
