@@ -356,3 +356,145 @@ async def test_apply_action_suggestion_uses_suggested_action_name(
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_defined_name"] == "拿取工件"
+
+
+@pytest.mark.asyncio
+async def test_get_session_frame_overlays_returns_objects_and_pose_fields(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    admin_token: str,
+):
+    template = VideoTemplate(
+        name="Overlay Template",
+        description="frame overlay preview",
+        video_path="/tmp/overlay-template.mp4",
+        business_type="assembly",
+        resolution="1280x720",
+        status="completed",
+    )
+    db_session.add(template)
+    await db_session.flush()
+
+    session = LearningSession(
+        template_id=template.id,
+        status="completed",
+        progress=100.0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    from app.models.models import KeyFrame
+
+    frame = KeyFrame(
+        session_id=session.id,
+        template_id=template.id,
+        frame_number=12,
+        timestamp=1.2,
+        image_path="/tmp/frame-overlay.jpg",
+        detections={
+            "objects": [
+                {"class_name": "hand", "confidence": 0.95, "bbox": [0.1, 0.2, 0.3, 0.4]},
+                {"class_name": "screwdriver", "confidence": 0.88, "bbox": [0.4, 0.3, 0.5, 0.6]},
+            ],
+            "pose_keypoints": [
+                {
+                    "person_index": 0,
+                    "points": [
+                        {"index": 5, "x": 120.0, "y": 200.0, "conf": 0.91},
+                        {"index": 6, "x": 180.0, "y": 220.0, "conf": 0.89},
+                    ],
+                }
+            ],
+            "interaction_summary": {
+                "interaction_count": 1,
+            },
+        },
+        scene_change_score=4.0,
+        is_action_boundary=False,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(frame)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/video-learning/sessions/{session.id}/frame-overlays",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["frame_number"] == 12
+    assert data[0]["timestamp"] == 1.2
+    assert data[0]["objects"][0]["class_name"] == "hand"
+    assert data[0]["pose_keypoints"][0]["person_index"] == 0
+    assert data[0]["interaction_summary"]["interaction_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_session_frame_overlays_supports_range_stride_limit_and_empty(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    admin_token: str,
+):
+    from app.models.models import KeyFrame
+
+    template = VideoTemplate(
+        name="Overlay Range Template",
+        description="frame overlay filters",
+        video_path="/tmp/overlay-range-template.mp4",
+        business_type="assembly",
+        status="completed",
+    )
+    db_session.add(template)
+    await db_session.flush()
+
+    session = LearningSession(
+        template_id=template.id,
+        status="completed",
+        progress=100.0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    for idx, timestamp in enumerate([0.1, 0.5, 0.9, 1.3], start=1):
+        db_session.add(KeyFrame(
+            session_id=session.id,
+            template_id=template.id,
+            frame_number=idx,
+            timestamp=timestamp,
+            image_path=f"/tmp/frame-{idx}.jpg",
+            detections={
+                "objects": [{"class_name": f"obj-{idx}", "confidence": 0.8, "bbox": [0.1, 0.1, 0.2, 0.2]}],
+                "pose_keypoints": [],
+                "interaction_summary": {"interaction_count": idx},
+            },
+            scene_change_score=float(idx),
+            is_action_boundary=False,
+            created_at=datetime.now(UTC),
+        ))
+
+    empty_session = LearningSession(
+        template_id=template.id,
+        status="completed",
+        progress=100.0,
+    )
+    db_session.add(empty_session)
+    await db_session.commit()
+
+    filtered = await client.get(
+        f"/api/video-learning/sessions/{session.id}/frame-overlays",
+        params={"start_time": 0.2, "end_time": 1.0, "stride": 2, "limit": 1},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert filtered.status_code == 200
+    filtered_data = filtered.json()
+    assert len(filtered_data) == 1
+    assert filtered_data[0]["timestamp"] == 0.5
+
+    empty_resp = await client.get(
+        f"/api/video-learning/sessions/{empty_session.id}/frame-overlays",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert empty_resp.status_code == 200
+    assert empty_resp.json() == []

@@ -14,6 +14,7 @@ from app.schemas.video_learning import (
     LearningSessionResponse,
     StartLearningRequest,
     ActionSequenceResponse,
+    FrameOverlayResponse,
     KeyFrameResponse,
     LearningSummary,
     VideoLearningConfigUpdate,
@@ -45,6 +46,22 @@ def _serialize_action_with_suggestions(action) -> ActionSequenceResponse:
     return response.model_copy(update={
         "suggestions": (action.features or {}).get("suggestions", []),
     })
+
+
+def _serialize_frame_overlay(frame) -> FrameOverlayResponse:
+    detections = frame.detections or {}
+    if isinstance(detections, list):
+        detections = {"objects": detections}
+    return FrameOverlayResponse(
+        frame_number=frame.frame_number,
+        timestamp=frame.timestamp,
+        image_path=frame.image_path,
+        objects=detections.get("objects", []),
+        pose_keypoints=detections.get("pose_keypoints", []),
+        interaction_summary=detections.get("interaction_summary", {}),
+        scene_change_score=frame.scene_change_score,
+        is_action_boundary=frame.is_action_boundary,
+    )
 
 
 def _build_sop_preview(template, actions, workflow_summary: dict) -> dict:
@@ -341,6 +358,30 @@ async def get_session(session_id: int, user: User = Depends(require_auth), db: A
 async def get_session_actions(session_id: int, user: User = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     actions = await crud.get_actions_by_session(db, session_id)
     return [_serialize_action_with_suggestions(action) for action in actions]
+
+
+@router.get("/sessions/{session_id}/frame-overlays", response_model=list[FrameOverlayResponse])
+async def get_session_frame_overlays(
+    session_id: int,
+    start_time: float | None = None,
+    end_time: float | None = None,
+    stride: int = 1,
+    limit: int = 300,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await crud.get_session(db, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    frames = await crud.get_frame_overlays_by_session(
+        db,
+        session_id,
+        start_time=start_time,
+        end_time=end_time,
+        stride=max(stride, 1),
+        limit=max(limit, 1),
+    )
+    return [_serialize_frame_overlay(frame) for frame in frames]
 
 
 @router.put("/actions/{action_id}", response_model=ActionSequenceResponse)

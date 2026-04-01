@@ -110,6 +110,35 @@ class TemplateCompareResponse(BaseModel):
     avg_duration_gap: float
 
 
+class FrameOverlayObjectResponse(BaseModel):
+    class_name: str
+    confidence: Optional[float] = None
+    bbox: list[float] = Field(default_factory=list)
+
+
+class FrameOverlayPosePointResponse(BaseModel):
+    index: int
+    x: float
+    y: float
+    conf: Optional[float] = None
+
+
+class FrameOverlayPoseResponse(BaseModel):
+    person_index: int
+    points: list[FrameOverlayPosePointResponse] = Field(default_factory=list)
+
+
+class FrameOverlayResponse(BaseModel):
+    frame_number: int
+    timestamp: float
+    image_path: Optional[str] = None
+    objects: list[FrameOverlayObjectResponse] = Field(default_factory=list)
+    pose_keypoints: list[FrameOverlayPoseResponse] = Field(default_factory=list)
+    interaction_summary: dict = Field(default_factory=dict)
+    scene_change_score: Optional[float] = None
+    is_action_boundary: bool = False
+
+
 # ── ActionSequence ──
 
 class ActionSequenceResponse(BaseModel):

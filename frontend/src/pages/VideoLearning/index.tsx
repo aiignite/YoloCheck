@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Card, Table, Button, Upload, Modal, Form, Input, Select, Tag, Progress,
   Space, message, Descriptions, Image, Row, Col, Statistic, Tabs, InputNumber,
-  List, Checkbox, Divider,
+  Checkbox, Divider, Slider, Flex,
 } from 'antd';
 import {
   UploadOutlined, PlayCircleOutlined, EyeOutlined,
-  VideoCameraOutlined, ClockCircleOutlined, AimOutlined, EditOutlined,
+  VideoCameraOutlined, ClockCircleOutlined, AimOutlined, EditOutlined, PauseOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -68,6 +68,17 @@ interface ActionSequence {
   features?: Record<string, any> | null;
 }
 
+interface FrameOverlay {
+  frame_number: number;
+  timestamp: number;
+  image_path?: string | null;
+  objects: Array<Record<string, any>>;
+  pose_keypoints: Array<Record<string, any>>;
+  interaction_summary?: Record<string, any> | null;
+  scene_change_score?: number | null;
+  is_action_boundary: boolean;
+}
+
 const defaultFocusClasses = ['screwdriver', 'product', 'hand'];
 
 export default function VideoLearning() {
@@ -86,7 +97,24 @@ export default function VideoLearning() {
   const [compareTargetId, setCompareTargetId] = useState<number | null>(null);
   const [compareResult, setCompareResult] = useState<Record<string, any> | null>(null);
   const [sopPreview, setSopPreview] = useState<Record<string, any> | null>(null);
+  const [overlayFrames, setOverlayFrames] = useState<FrameOverlay[]>([]);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [showBoxes, setShowBoxes] = useState(true);
+  const [showPose, setShowPose] = useState(true);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const { t } = useTranslation();
+
+  const resolveAssetUrl = useCallback((path?: string | null) => {
+    if (!path) return '';
+    const baseUrl = api.defaults.baseURL?.replace('/api', '') || '';
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('/uploads/')) return `${baseUrl}${path}`;
+    if (path.startsWith('uploads/')) return `${baseUrl}/${path}`;
+    if (path.startsWith('/')) return `${baseUrl}${path}`;
+    return `${baseUrl}/${path}`;
+  }, []);
 
   const businessTypeOptions = [
     { value: 'assembly', label: t('pages.videoLearning.assembly') },
@@ -123,24 +151,31 @@ export default function VideoLearning() {
   const openWorkbench = async (tpl: VideoTemplate) => {
     setSelectedTemplate(tpl);
     setDetailOpen(true);
-    configForm.setFieldsValue({
-      learning_mode: tpl.learning_config?.learning_mode || 'action_and_object',
-      sample_rate: tpl.learning_config?.sample_rate || 5,
-      min_confidence: tpl.learning_config?.min_confidence || 0.4,
-      scene_threshold: tpl.learning_config?.scene_threshold || 30,
-      focus_classes: tpl.learning_config?.focus_classes || defaultFocusClasses,
-    });
+    setCurrentTime(0);
+    setIsPlaying(false);
+    setTimeout(() => {
+      configForm.setFieldsValue({
+        learning_mode: tpl.learning_config?.learning_mode || 'action_and_object',
+        sample_rate: tpl.learning_config?.sample_rate || 5,
+        min_confidence: tpl.learning_config?.min_confidence || 0.4,
+        scene_threshold: tpl.learning_config?.scene_threshold || 30,
+        focus_classes: tpl.learning_config?.focus_classes || defaultFocusClasses,
+      });
+    }, 0);
     try {
       const sessRes = await api.get(`/video-learning/templates/${tpl.id}/sessions`);
       setSessions(sessRes.data);
       const completed = (sessRes.data as LearningSession[]).find((s) => s.status === 'completed') || sessRes.data[0];
       if (completed) {
         const actRes = await api.get(`/video-learning/sessions/${completed.id}/actions`);
+        const overlayRes = await api.get(`/video-learning/sessions/${completed.id}/frame-overlays`);
         setActions(actRes.data);
+        setOverlayFrames(overlayRes.data);
         const sopRes = await api.post(`/video-learning/templates/${tpl.id}/sop-preview`);
         setSopPreview(sopRes.data);
       } else {
         setActions([]);
+        setOverlayFrames([]);
         setSopPreview(null);
       }
     } catch {
@@ -205,12 +240,14 @@ export default function VideoLearning() {
 
   const openActionEdit = (action: ActionSequence) => {
     setEditingAction(action);
-    editActionForm.setFieldsValue({
-      user_defined_name: action.user_defined_name || action.action_name,
-      note: action.note || '',
-      is_kept: action.is_kept,
-    });
     setEditingOpen(true);
+    setTimeout(() => {
+      editActionForm.setFieldsValue({
+        user_defined_name: action.user_defined_name || action.action_name,
+        note: action.note || '',
+        is_kept: action.is_kept,
+      });
+    }, 0);
   };
 
   const saveActionEdit = async () => {
@@ -279,6 +316,111 @@ export default function VideoLearning() {
   const pendingSuggestions = workflowSuggestions.length + actions.reduce((count, action) => {
     return count + ((action.suggestions || action.features?.suggestions || []).length);
   }, 0);
+  const videoUrl = resolveAssetUrl(selectedTemplate?.video_path);
+  const currentOverlayFrame = useMemo(() => {
+    if (!overlayFrames.length) return null;
+    return overlayFrames.reduce<FrameOverlay | null>((closest, frame) => {
+      if (!closest) return frame;
+      return Math.abs(frame.timestamp - currentTime) < Math.abs(closest.timestamp - currentTime) ? frame : closest;
+    }, null);
+  }, [overlayFrames, currentTime]);
+  const currentAction = useMemo(() => {
+    return actions.find((action) => {
+      if (action.start_time == null || action.end_time == null) return false;
+      return currentTime >= action.start_time && currentTime <= action.end_time;
+    }) || null;
+  }, [actions, currentTime]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = overlayCanvasRef.current;
+    if (!video || !canvas) return;
+    const width = video.clientWidth || 0;
+    const height = video.clientHeight || 0;
+    if (!width || !height) return;
+
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+
+    if (showBoxes && currentOverlayFrame?.objects?.length) {
+      currentOverlayFrame.objects.forEach((obj) => {
+        const bbox = Array.isArray(obj.bbox) ? obj.bbox : [];
+        if (bbox.length !== 4) return;
+        const [x1, y1, x2, y2] = bbox;
+        const left = x1 <= 1 ? x1 * width : x1;
+        const top = y1 <= 1 ? y1 * height : y1;
+        const right = x2 <= 1 ? x2 * width : x2;
+        const bottom = y2 <= 1 ? y2 * height : y2;
+        ctx.strokeStyle = '#00b96b';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1));
+        ctx.fillStyle = 'rgba(0, 185, 107, 0.85)';
+        ctx.fillRect(left, Math.max(top - 22, 0), 120, 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px sans-serif';
+        const confidence = typeof obj.confidence === 'number' ? ` ${(obj.confidence * 100).toFixed(0)}%` : '';
+        ctx.fillText(`${obj.class_name || 'object'}${confidence}`, left + 6, Math.max(top - 8, 12));
+      });
+    }
+
+    if (showPose && currentOverlayFrame?.pose_keypoints?.length) {
+      const skeletonPairs = [
+        [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+        [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+      ];
+      currentOverlayFrame.pose_keypoints.forEach((person) => {
+        const points = Array.isArray(person.points) ? person.points : [];
+        const pointMap = new Map<number, { x: number; y: number; conf?: number }>();
+        points.forEach((point) => {
+          pointMap.set(point.index, { x: point.x, y: point.y, conf: point.conf });
+        });
+
+        ctx.strokeStyle = '#1677ff';
+        ctx.lineWidth = 2;
+        skeletonPairs.forEach(([start, end]) => {
+          const p1 = pointMap.get(start);
+          const p2 = pointMap.get(end);
+          if (!p1 || !p2) return;
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        });
+
+        points.forEach((point) => {
+          ctx.fillStyle = '#1677ff';
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+    }
+  }, [currentOverlayFrame, showBoxes, showPose, currentTime]);
+
+  const togglePlayback = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+    } else {
+      video.pause();
+    }
+  };
+
+  const handleSeek = (value: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = value;
+    setCurrentTime(value);
+  };
+
+  const seekToAction = (action: ActionSequence) => {
+    if (action.start_time == null) return;
+    handleSeek(action.start_time);
+  };
 
   const columns = [
     { title: t('common.name'), dataIndex: 'name', key: 'name' },
@@ -414,6 +556,89 @@ export default function VideoLearning() {
             <Col span={16}>
               {latestSession && (
                 <>
+                  <Card title="视频回放" size="small" style={{ marginBottom: 16 }}>
+                    {videoUrl ? (
+                      <>
+                        <div style={{ position: 'relative' }}>
+                          <video
+                            ref={videoRef}
+                            src={videoUrl}
+                            controls={false}
+                            style={{ width: '100%', maxHeight: 360, background: '#000', borderRadius: 6, display: 'block' }}
+                            onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                            onPlay={() => setIsPlaying(true)}
+                            onPause={() => setIsPlaying(false)}
+                          />
+                          <canvas
+                            ref={overlayCanvasRef}
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                          />
+                          {currentAction && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: 12,
+                                left: 12,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 8,
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              <Tag color="processing" style={{ width: 'fit-content', marginInlineEnd: 0 }}>
+                                步骤 {currentAction.step_order}: {currentAction.user_defined_name || currentAction.action_name}
+                              </Tag>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {(currentAction.objects_in_scene || []).map((obj) => (
+                                  <Tag key={`current-${obj}`} color="green" style={{ marginInlineEnd: 0 }}>
+                                    {obj}
+                                  </Tag>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <Flex vertical style={{ width: '100%', marginTop: 12, gap: 12 }}>
+                          <Space wrap>
+                            <Button
+                              size="small"
+                              icon={isPlaying ? <PauseOutlined /> : <PlayCircleOutlined />}
+                              onClick={togglePlayback}
+                            >
+                              {isPlaying ? '暂停' : '播放'}
+                            </Button>
+                            <span>
+                              {currentTime.toFixed(1)}s / {selectedTemplate.duration_seconds?.toFixed(1) ?? '0.0'}s
+                            </span>
+                            <Tag>{overlayFrames.length} 帧分析</Tag>
+                            <Button size="small" type={showBoxes ? 'primary' : 'default'} onClick={() => setShowBoxes((prev) => !prev)}>
+                              显示目标框
+                            </Button>
+                            <Button size="small" type={showPose ? 'primary' : 'default'} onClick={() => setShowPose((prev) => !prev)}>
+                              显示骨骼
+                            </Button>
+                          </Space>
+                          {currentAction?.features?.pose_summary && (
+                            <Space wrap>
+                              <Tag color="blue">pose: {currentAction.features.pose_summary.frames_with_pose ?? 0}</Tag>
+                              <Tag>wrist_x: {currentAction.features.pose_summary.wrist_span_x ?? 0}</Tag>
+                              <Tag>wrist_y: {currentAction.features.pose_summary.wrist_span_y ?? 0}</Tag>
+                            </Space>
+                          )}
+                          <Slider
+                            min={0}
+                            max={selectedTemplate.duration_seconds ?? 0}
+                            step={0.1}
+                            value={currentTime}
+                            onChange={handleSeek}
+                          />
+                        </Flex>
+                      </>
+                    ) : (
+                      <div>{t('common.noData')}</div>
+                    )}
+                  </Card>
+
                   <Row gutter={16}>
                     <Col span={6}><Card size="small"><Statistic title={t('pages.videoLearning.detectedObjects')} value={latestSession.objects_detected} prefix={<AimOutlined />} /></Card></Col>
                     <Col span={6}><Card size="small"><Statistic title={t('pages.videoLearning.identifiedActions')} value={latestSession.actions_identified} prefix={<VideoCameraOutlined />} /></Card></Col>
@@ -442,46 +667,50 @@ export default function VideoLearning() {
                           key: 'timeline',
                           label: t('pages.videoLearning.timeline'),
                           children: (
-                            <List
-                              dataSource={actions}
-                              renderItem={(action) => (
-                                <List.Item
-                                  actions={[
-                                    <Button key="edit" size="small" icon={<EditOutlined />} onClick={() => openActionEdit(action)}>
-                                      {t('common.edit')}
-                                    </Button>,
-                                    <Button key="split" size="small" onClick={() => splitAction(action)}>
-                                      {t('pages.videoLearning.split')}
-                                    </Button>,
-                                    <Button key="merge" size="small" onClick={() => mergeAction(action)}>
-                                      {t('pages.videoLearning.mergePrev')}
-                                    </Button>,
-                                  ]}
+                            <Flex vertical gap={8}>
+                              {actions.map((action) => (
+                                <Card
+                                  key={action.id}
+                                  size="small"
+                                  style={{
+                                    backgroundColor: currentAction?.id === action.id ? 'rgba(22, 119, 255, 0.08)' : undefined,
+                                    cursor: action.start_time != null ? 'pointer' : 'default',
+                                  }}
+                                  onClick={() => seekToAction(action)}
                                 >
-                                  <List.Item.Meta
-                                    title={`${t('pages.videoLearning.step')} ${action.step_order}: ${action.user_defined_name || action.action_name}`}
-                                    description={
-                                      <Space direction="vertical" size={2}>
-                                        <span>{action.start_time?.toFixed(1)}s - {action.end_time?.toFixed(1)}s ({action.duration?.toFixed(1)}s)</span>
-                                        <span>{action.description}</span>
-                                        <span>{t('pages.videoLearning.qualityScore')}: {action.features?.quality_score ?? '-'}</span>
-                                        {action.features?.suggested_action_name && <span>{t('pages.videoLearning.suggestedActionName')}: {action.features?.suggested_action_name}</span>}
-                                        <Space wrap>
-                                          {action.objects_in_scene?.map((obj) => <Tag key={obj}>{obj}</Tag>)}
-                                        </Space>
+                                  <Flex justify="space-between" align="flex-start" gap={12}>
+                                    <Flex vertical gap={4} style={{ flex: 1 }}>
+                                      <strong>{`${t('pages.videoLearning.step')} ${action.step_order}: ${action.user_defined_name || action.action_name}`}</strong>
+                                      <span>{action.start_time?.toFixed(1)}s - {action.end_time?.toFixed(1)}s ({action.duration?.toFixed(1)}s)</span>
+                                      <span>{action.description}</span>
+                                      <span>{t('pages.videoLearning.qualityScore')}: {action.features?.quality_score ?? '-'}</span>
+                                      {action.features?.suggested_action_name && <span>{t('pages.videoLearning.suggestedActionName')}: {action.features?.suggested_action_name}</span>}
+                                      <Space wrap>
+                                        {action.objects_in_scene?.map((obj: string) => <Tag key={obj}>{obj}</Tag>)}
                                       </Space>
-                                    }
-                                  />
-                                </List.Item>
-                              )}
-                            />
+                                    </Flex>
+                                    <Space>
+                                      <Button size="small" icon={<EditOutlined />} onClick={(event) => { event.stopPropagation(); openActionEdit(action); }}>
+                                        {t('common.edit')}
+                                      </Button>
+                                      <Button size="small" onClick={(event) => { event.stopPropagation(); splitAction(action); }}>
+                                        {t('pages.videoLearning.split')}
+                                      </Button>
+                                      <Button size="small" onClick={(event) => { event.stopPropagation(); mergeAction(action); }}>
+                                        {t('pages.videoLearning.mergePrev')}
+                                      </Button>
+                                    </Space>
+                                  </Flex>
+                                </Card>
+                              ))}
+                            </Flex>
                           ),
                         },
                         {
                           key: 'suggestions',
                           label: t('pages.videoLearning.smartSuggestions'),
                           children: (
-                            <Space direction="vertical" style={{ width: '100%' }}>
+                            <Flex vertical style={{ width: '100%', gap: 12 }}>
                               {workflowSuggestions.map((suggestion: Record<string, any>, index: number) => (
                                 <Card key={`workflow-${index}`} size="small" title={t('pages.videoLearning.workflowSuggestion')}>
                                   <div>{suggestion.message}</div>
@@ -491,24 +720,24 @@ export default function VideoLearning() {
                                 const suggestions = action.suggestions || action.features?.suggestions || [];
                                 return (
                                   <Card key={action.id} size="small" title={`${t('pages.videoLearning.step')} ${action.step_order}: ${action.user_defined_name || action.action_name}`}>
-                                    <Space direction="vertical" style={{ width: '100%' }}>
+                                    <Flex vertical style={{ width: '100%', gap: 12 }}>
                                       <div>{t('pages.videoLearning.qualityScore')}: {action.features?.quality_score ?? '-'}</div>
                                       {suggestions.map((suggestion: Record<string, any>, index: number) => (
                                         <Card key={`${action.id}-${index}`} size="small" type="inner" title={t('pages.videoLearning.actionSuggestion')}>
-                                          <Space direction="vertical" style={{ width: '100%' }}>
+                                          <Flex vertical style={{ width: '100%', gap: 8 }}>
                                             <div>{suggestion.message}</div>
                                             <Button size="small" onClick={() => applySuggestion(action, suggestion.type || 'rename')}>
                                               {t('pages.videoLearning.applySuggestion')}
                                             </Button>
-                                          </Space>
+                                          </Flex>
                                         </Card>
                                       ))}
                                       {suggestions.length === 0 && <div>{t('pages.videoLearning.noSuggestions')}</div>}
-                                    </Space>
+                                    </Flex>
                                   </Card>
                                 );
                               })}
-                            </Space>
+                            </Flex>
                           ),
                         },
                         {
@@ -548,7 +777,7 @@ export default function VideoLearning() {
                           key: 'compare',
                           label: t('pages.videoLearning.templateCompare'),
                           children: (
-                            <Space direction="vertical" style={{ width: '100%' }}>
+                            <Flex vertical style={{ width: '100%', gap: 12 }}>
                               <Space>
                                 <Select
                                   style={{ width: 260 }}
@@ -573,14 +802,14 @@ export default function VideoLearning() {
                                   </Descriptions>
                                 </Card>
                               )}
-                            </Space>
+                            </Flex>
                           ),
                         },
                         {
                           key: 'sop',
                           label: t('pages.videoLearning.sopPreview'),
                           children: sopPreview ? (
-                            <Space direction="vertical" style={{ width: '100%' }}>
+                            <Flex vertical style={{ width: '100%', gap: 12 }}>
                               <Card size="small" title={sopPreview.title || t('pages.videoLearning.sopPreview')}>
                                 <Descriptions size="small" column={1}>
                                   <Descriptions.Item label={t('pages.videoLearning.businessType')}>{sopPreview.business_type}</Descriptions.Item>
@@ -590,16 +819,16 @@ export default function VideoLearning() {
                               </Card>
                               {(sopPreview.steps || []).map((step: Record<string, any>) => (
                                 <Card key={step.step_order} size="small" title={`${t('pages.videoLearning.step')} ${step.step_order}: ${step.name}`}>
-                                  <Space direction="vertical" style={{ width: '100%' }}>
+                                  <Flex vertical style={{ width: '100%', gap: 8 }}>
                                     <div>{step.description || '-'}</div>
                                     <Space wrap>
                                       {(step.objects || []).map((obj: string) => <Tag key={`${step.step_order}-${obj}`}>{obj}</Tag>)}
                                     </Space>
                                     {step.keyframe_path && <div>{step.keyframe_path}</div>}
-                                  </Space>
+                                  </Flex>
                                 </Card>
                               ))}
-                            </Space>
+                            </Flex>
                           ) : (
                             <div>{t('pages.videoLearning.noSopPreview')}</div>
                           ),

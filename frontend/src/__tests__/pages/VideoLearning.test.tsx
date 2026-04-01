@@ -163,6 +163,29 @@ const mockActions = [
   },
 ];
 
+const mockFrameOverlays = [
+  {
+    frame_number: 1,
+    timestamp: 0.1,
+    image_path: '/tmp/frame-1.jpg',
+    objects: [
+      { class_name: 'part', confidence: 0.92, bbox: [0.1, 0.1, 0.3, 0.4] },
+    ],
+    pose_keypoints: [
+      {
+        person_index: 0,
+        points: [
+          { index: 5, x: 120, y: 220, conf: 0.9 },
+          { index: 6, x: 180, y: 250, conf: 0.88 },
+        ],
+      },
+    ],
+    interaction_summary: { interaction_count: 1 },
+    scene_change_score: 2,
+    is_action_boundary: false,
+  },
+];
+
 describe('VideoLearning 页面', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -175,6 +198,9 @@ describe('VideoLearning 页面', () => {
       }
       if (url === '/video-learning/sessions/101/actions') {
         return Promise.resolve({ data: mockActions });
+      }
+      if (url === '/video-learning/sessions/101/frame-overlays') {
+        return Promise.resolve({ data: mockFrameOverlays });
       }
       return Promise.resolve({ data: [] });
     });
@@ -228,7 +254,7 @@ describe('VideoLearning 页面', () => {
       expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
     });
 
-    await user.click(screen.getByRole('button', { name: /学习工作台/ }));
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
 
     await waitFor(() => {
       expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates/1/sessions');
@@ -248,5 +274,23 @@ describe('VideoLearning 页面', () => {
     expect(screen.getByText(/标准作业指导书/)).toBeInTheDocument();
     expect(screen.getAllByText(/拿取工件/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/part/).length).toBeGreaterThan(0);
+  });
+
+  it('打开工作台时请求 overlay 数据并显示视频回放区域', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/frame-overlays');
+    });
+
+    expect(screen.getByText(/视频回放|视频分析回放|pages\.videoLearning\.videoPlayback/)).toBeInTheDocument();
+    expect(screen.getByText(/显示目标框|pages\.videoLearning\.showBoxes/)).toBeInTheDocument();
   });
 });

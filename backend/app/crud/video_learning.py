@@ -266,6 +266,29 @@ async def get_keyframes_by_session(
     return result.scalars().all()
 
 
+async def get_frame_overlays_by_session(
+    db: AsyncSession,
+    session_id: int,
+    start_time: Optional[float] = None,
+    end_time: Optional[float] = None,
+    stride: int = 1,
+    limit: int = 300,
+) -> Sequence[KeyFrame]:
+    query = select(KeyFrame).where(KeyFrame.session_id == session_id)
+    if start_time is not None:
+        query = query.where(KeyFrame.timestamp >= start_time)
+    if end_time is not None:
+        query = query.where(KeyFrame.timestamp <= end_time)
+    query = query.order_by(KeyFrame.frame_number)
+    result = await db.execute(query)
+    frames = list(result.scalars().all())
+    if stride > 1:
+        frames = frames[::stride]
+    if limit > 0:
+        frames = frames[:limit]
+    return frames
+
+
 async def get_keyframe_count(db: AsyncSession, session_id: int) -> int:
     result = await db.execute(
         select(func.count(KeyFrame.id)).where(KeyFrame.session_id == session_id)
