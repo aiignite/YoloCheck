@@ -46,6 +46,8 @@ const mockTemplate = {
     min_confidence: 0.4,
     scene_threshold: 30,
     focus_classes: ['screwdriver', 'part', 'hand'],
+    object_model_id: 11,
+    action_model_id: 22,
   },
   sop_content: {
     title: '标准作业指导书',
@@ -193,6 +195,14 @@ describe('VideoLearning 页面', () => {
       if (url === '/video-learning/templates') {
         return Promise.resolve({ data: [mockTemplate] });
       }
+      if (url === '/models') {
+        return Promise.resolve({
+          data: [
+            { id: 11, name: 'custom-object-v1', version: 'v1', model_type: 'custom_object', is_active: true, status: 'deployed', description: '', model_path: '/tmp/object.pt', file_size: 100, accuracy: 0.9, precision: 0.9, recall: 0.9, map50: 0.9, map50_95: 0.8, inference_speed: 10, deployed_at: null, created_at: '2026-04-02T00:00:00Z' },
+            { id: 22, name: 'custom-action-v1', version: 'v1', model_type: 'custom_action', is_active: true, status: 'deployed', description: '', model_path: '/tmp/action.json', file_size: 100, accuracy: 0.8, precision: 0.8, recall: 0.8, map50: null, map50_95: null, inference_speed: 5, deployed_at: null, created_at: '2026-04-02T00:00:00Z' },
+          ],
+        });
+      }
       if (url === '/video-learning/templates/1/sessions') {
         return Promise.resolve({ data: [mockSession] });
       }
@@ -258,7 +268,7 @@ describe('VideoLearning 页面', () => {
 
     await waitFor(() => {
       expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates/1/sessions');
-      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
     });
 
     expect(screen.getByText(/流程概览|pages\.videoLearning\.workflowOverview/)).toBeInTheDocument();
@@ -274,6 +284,20 @@ describe('VideoLearning 页面', () => {
     expect(screen.getByText(/标准作业指导书/)).toBeInTheDocument();
     expect(screen.getAllByText(/拿取工件/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/part/).length).toBeGreaterThan(0);
+  });
+
+  it('展示自定义物体模型和动作模型选择器', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    expect(await screen.findByText('物体模型')).toBeInTheDocument();
+    expect(screen.getByText('动作模型')).toBeInTheDocument();
   });
 
   it('打开工作台时请求 overlay 数据并显示视频回放区域', async () => {

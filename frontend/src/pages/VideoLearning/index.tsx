@@ -79,6 +79,13 @@ interface FrameOverlay {
   is_action_boundary: boolean;
 }
 
+interface ModelOption {
+  id: number;
+  name: string;
+  version: string;
+  model_type: string;
+}
+
 const defaultFocusClasses = ['screwdriver', 'product', 'hand'];
 
 export default function VideoLearning() {
@@ -102,6 +109,8 @@ export default function VideoLearning() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showBoxes, setShowBoxes] = useState(true);
   const [showPose, setShowPose] = useState(true);
+  const [objectModels, setObjectModels] = useState<ModelOption[]>([]);
+  const [actionModels, setActionModels] = useState<ModelOption[]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const { t } = useTranslation();
@@ -148,6 +157,21 @@ export default function VideoLearning() {
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const res = await api.get('/models');
+        const allModels = Array.isArray(res.data) ? res.data : [];
+        setObjectModels(allModels.filter((item) => item.model_type === 'custom_object'));
+        setActionModels(allModels.filter((item) => item.model_type === 'custom_action'));
+      } catch {
+        setObjectModels([]);
+        setActionModels([]);
+      }
+    };
+    void loadModels();
+  }, []);
+
   const openWorkbench = async (tpl: VideoTemplate) => {
     setSelectedTemplate(tpl);
     setDetailOpen(true);
@@ -160,6 +184,9 @@ export default function VideoLearning() {
         min_confidence: tpl.learning_config?.min_confidence || 0.4,
         scene_threshold: tpl.learning_config?.scene_threshold || 30,
         focus_classes: tpl.learning_config?.focus_classes || defaultFocusClasses,
+        object_model_id: tpl.learning_config?.object_model_id,
+        action_model_id: tpl.learning_config?.action_model_id,
+        object_category_ids: tpl.learning_config?.object_category_ids || [],
       });
     }, 0);
     try {
@@ -542,6 +569,18 @@ export default function VideoLearning() {
                   </Form.Item>
                   <Form.Item name="focus_classes" label={t('pages.videoLearning.focusClasses')}>
                     <Select mode="tags" tokenSeparators={[',']} placeholder={t('pages.videoLearning.focusClassesPlaceholder')} />
+                  </Form.Item>
+                  <Form.Item name="object_model_id" label="物体模型">
+                    <Select
+                      allowClear
+                      options={objectModels.map((item) => ({ value: item.id, label: `${item.name} ${item.version}` }))}
+                    />
+                  </Form.Item>
+                  <Form.Item name="action_model_id" label="动作模型">
+                    <Select
+                      allowClear
+                      options={actionModels.map((item) => ({ value: item.id, label: `${item.name} ${item.version}` }))}
+                    />
                   </Form.Item>
                   <Space>
                     <Button onClick={saveLearningConfig}>{t('common.save')}</Button>

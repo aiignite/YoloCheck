@@ -13,6 +13,7 @@ import MES from './pages/MES';
 import Settings from './pages/Settings';
 import AuditLogs from './pages/AuditLogs';
 import ModelManager from './pages/ModelManager';
+import VideoTraining from './pages/VideoTraining';
 import BatchAnalysis from './pages/BatchAnalysis';
 import AlertWorkflow from './pages/AlertWorkflow';
 import StorageManage from './pages/StorageManage';
@@ -41,6 +42,7 @@ function App() {
             <Route path="users" element={<Users />} />
             <Route path="mes" element={<MES />} />
             <Route path="models" element={<ModelManager />} />
+            <Route path="video-training" element={<VideoTraining />} />
             <Route path="batch-analysis" element={<BatchAnalysis />} />
             <Route path="alert-workflow" element={<AlertWorkflow />} />
             <Route path="storage" element={<StorageManage />} />

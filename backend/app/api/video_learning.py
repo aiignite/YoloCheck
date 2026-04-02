@@ -1,13 +1,13 @@
 """视频学习API端点"""
 import os
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import get_db, async_session
+from app.database import get_db
 from app.config import get_settings
 from app.schemas.video_learning import (
     VideoTemplateResponse,
@@ -27,7 +27,9 @@ from app.schemas.video_learning import (
     TemplateCompareResponse,
 )
 from app.crud import video_learning as crud
+from app.crud import model as model_crud
 from app.core.video_learning import (
+    apply_custom_action_model,
     get_video_metadata,
     analyze_video_frames,
     extract_actions,
@@ -39,6 +41,10 @@ from app.models.models import User
 router = APIRouter()
 settings = get_settings()
 _executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _serialize_action_with_suggestions(action) -> ActionSequenceResponse:
@@ -181,14 +187,31 @@ async def delete_template(template_id: int, _user: User = Depends(require_role("
 
 # ── 学习会话 ──
 
-async def _run_learning(session_id: int, template_id: int, video_path: str, params: dict):
+async def _run_learning(
+    session_id: int,
+    template_id: int,
+    video_path: str,
+    params: dict,
+    session_factory: async_sessionmaker[AsyncSession],
+):
     """后台学习任务"""
-    async with async_session() as db:
+    async with session_factory() as db:
         try:
+            object_model = None
+            action_model = None
+            if params.get("object_model_id"):
+                model = await model_crud.get_model(db, params["object_model_id"])
+                if model:
+                    object_model = {"id": model.id, "name": model.name, "model_path": model.model_path}
+            if params.get("action_model_id"):
+                model = await model_crud.get_model(db, params["action_model_id"])
+                if model:
+                    action_model = {"id": model.id, "name": model.name, "model_path": model.model_path}
+
             await crud.update_session(
                 db, session_id,
                 status="running",
-                started_at=datetime.utcnow(),
+                started_at=_utc_now(),
             )
 
             meta = get_video_metadata(video_path)
@@ -216,12 +239,20 @@ async def _run_learning(session_id: int, template_id: int, video_path: str, para
                     sample_rate=params.get("sample_rate", 5),
                     min_confidence=params.get("min_confidence", 0.4),
                     scene_threshold=params.get("scene_threshold", 30.0),
+                    object_model=object_model,
                 )
 
             analyzed_frames = await loop.run_in_executor(_executor, sync_analyze)
+            if object_model:
+                for frame in analyzed_frames:
+                    for det in frame.detections:
+                        det.setdefault("model_source", "custom_object")
+                        det.setdefault("model_id", object_model.get("id"))
+                        det.setdefault("model_name", object_model.get("name"))
 
             # 提取动作序列
             actions = extract_actions(analyzed_frames, meta.fps)
+            actions = apply_custom_action_model(actions, action_model)
 
             # 保存关键帧到数据库
             keyframe_data = []
@@ -274,7 +305,7 @@ async def _run_learning(session_id: int, template_id: int, video_path: str, para
                 objects_detected=summary["analysis"]["total_detections"],
                 actions_identified=len(actions),
                 analysis_result=summary,
-                completed_at=datetime.utcnow(),
+                completed_at=_utc_now(),
             )
 
             # 更新模板状态
@@ -321,6 +352,8 @@ async def start_learning(
         sample_rate=params.sample_rate,
         min_confidence=params.min_confidence,
         scene_threshold=params.scene_threshold,
+        object_model_id=params.object_model_id,
+        action_model_id=params.action_model_id,
     )
 
     # 更新模板状态
@@ -333,6 +366,7 @@ async def start_learning(
         template_id,
         tpl.video_path,
         params.model_dump(),
+        async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False),
     )
 
     return session

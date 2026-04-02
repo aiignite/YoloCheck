@@ -145,6 +145,8 @@ class LearningSession(Base):
     sample_rate = Column(Integer, default=5)
     min_confidence = Column(Float, default=0.4)
     scene_threshold = Column(Float, default=30.0)
+    object_model_id = Column(Integer, ForeignKey("models.id"))
+    action_model_id = Column(Integer, ForeignKey("models.id"))
     error_message = Column(Text)
     analysis_result = Column(JSON)  # 学习结果摘要
     started_at = Column(DateTime)
@@ -190,6 +192,111 @@ class KeyFrame(Base):
     detections = Column(JSON)  # YOLO检测结果列表
     scene_change_score = Column(Float)  # 场景变化分数
     is_action_boundary = Column(Boolean, default=False)  # 是否为动作边界帧
+    created_at = Column(DateTime, default=func.now())
+
+
+class ObjectCategory(Base):
+    """自定义物体类别"""
+    __tablename__ = "object_categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text)
+    color = Column(String(20), default="#1677ff")
+    icon = Column(String(100))
+    is_builtin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+
+
+class ObjectAnnotationSet(Base):
+    """物体标注集"""
+    __tablename__ = "object_annotation_sets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+    source_type = Column(String(30), nullable=False)  # video_frame / image_upload / imported
+    status = Column(String(20), default="draft")
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=func.now())
+
+
+class ObjectAnnotation(Base):
+    """物体标注样本"""
+    __tablename__ = "object_annotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    annotation_set_id = Column(Integer, ForeignKey("object_annotation_sets.id"), nullable=False)
+    image_path = Column(String(500), nullable=False)
+    frame_number = Column(Integer)
+    source_video_template_id = Column(Integer, ForeignKey("video_templates.id"))
+    width = Column(Integer)
+    height = Column(Integer)
+    annotations_json = Column(JSON)
+    created_at = Column(DateTime, default=func.now())
+
+
+class ActionCategory(Base):
+    """自定义动作类别"""
+    __tablename__ = "action_categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+
+
+class ActionSampleSet(Base):
+    """动作样本集"""
+    __tablename__ = "action_sample_sets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+    source_type = Column(String(30), nullable=False)  # pose_json / video_pose_extract
+    status = Column(String(20), default="draft")
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=func.now())
+
+
+class ActionSample(Base):
+    """动作样本"""
+    __tablename__ = "action_samples"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sample_set_id = Column(Integer, ForeignKey("action_sample_sets.id"), nullable=False)
+    action_category_id = Column(Integer, ForeignKey("action_categories.id"), nullable=False)
+    source_session_id = Column(Integer, ForeignKey("learning_sessions.id"))
+    start_frame = Column(Integer)
+    end_frame = Column(Integer)
+    duration = Column(Float)
+    skeleton_sequence_json = Column(JSON, nullable=False)
+    metadata_json = Column(JSON)
+    created_at = Column(DateTime, default=func.now())
+
+
+class TrainingJob(Base):
+    """统一训练任务"""
+    __tablename__ = "training_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    job_type = Column(String(50), nullable=False)  # object_detection / action_recognition
+    dataset_type = Column(String(50), nullable=False)  # object_annotation_set / action_sample_set
+    dataset_id = Column(Integer, nullable=False)
+    model_id = Column(Integer, ForeignKey("models.id"))
+    status = Column(String(20), default="pending")
+    progress = Column(Float, default=0.0)
+    config_json = Column(JSON)
+    metrics_json = Column(JSON)
+    log_path = Column(String(500))
+    error_message = Column(Text)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
     created_at = Column(DateTime, default=func.now())
 
 

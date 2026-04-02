@@ -1,11 +1,15 @@
 """模型版本管理 CRUD"""
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional, Sequence
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Model
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 async def list_models(
@@ -75,7 +79,7 @@ async def deploy_model(db: AsyncSession, model_id: int) -> Optional[Model]:
     # 激活目标模型
     m.is_active = True
     m.status = "deployed"
-    m.deployed_at = datetime.utcnow()
+    m.deployed_at = _utc_now()
     await db.commit()
     await db.refresh(m)
     return m

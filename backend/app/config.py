@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 7
 
     # CORS
-    cors_origins: str = "http://localhost:5173,http://localhost:3260,http://localhost:8000"
+    cors_origins: str = "http://localhost:3270,http://localhost:5173,http://localhost:3260,http://localhost:8000"
 
     # 文件上传
     max_upload_size_mb: int = 50

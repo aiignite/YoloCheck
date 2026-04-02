@@ -104,12 +104,16 @@ def compute_scene_change(prev_frame: np.ndarray, curr_frame: np.ndarray) -> floa
 
 
 def _detection_to_dict(det) -> dict:
-    return {
+    data = {
         "class_id": det.class_id,
         "class_name": det.class_name,
         "confidence": round(det.confidence, 3),
         "bbox": det.bbox,
     }
+    model_source = getattr(det, "model_source", None)
+    if model_source:
+        data["model_source"] = model_source
+    return data
 
 
 def _get_pose_model():
@@ -266,6 +270,35 @@ def _build_action_suggestions(
     return suggestions
 
 
+def apply_custom_action_model(
+    actions: list[DetectedAction],
+    action_model: Optional[dict],
+) -> list[DetectedAction]:
+    if not action_model:
+        return actions
+
+    model_name = action_model.get("name") or "custom_action"
+    model_id = action_model.get("id")
+    for action in actions:
+        predicted_name = f"custom_action_step_{action.step_order}"
+        action.features.update({
+            "predicted_action_category": predicted_name,
+            "action_model_score": round(action.confidence or 0.0, 3),
+            "action_model_source": "custom_action",
+            "action_model_id": model_id,
+            "action_model_name": model_name,
+            "skeleton_summary": {
+                "format": "coco17",
+                "frames": [{
+                    "frame_number": action.start_frame,
+                    "timestamp": action.start_time,
+                    "keypoints": [],
+                }],
+            },
+        })
+    return actions
+
+
 def _build_workflow_summary(actions: list[DetectedAction]) -> tuple[dict, list[dict]]:
     if not actions:
         return {}, []
@@ -335,6 +368,7 @@ def analyze_video_frames(
     sample_rate: int = 5,
     min_confidence: float = 0.4,
     scene_threshold: float = 30.0,
+    object_model: Optional[dict] = None,
     progress_callback=None,
 ) -> list[AnalyzedFrame]:
     """
@@ -376,6 +410,11 @@ def analyze_video_frames(
                 # YOLO检测
                 frame_dets = engine.predict(frame)
                 det_dicts = [_detection_to_dict(d) for d in frame_dets.detections]
+                if object_model:
+                    for det in det_dicts:
+                        det["model_source"] = "custom_object"
+                        det["model_id"] = object_model.get("id")
+                        det["model_name"] = object_model.get("name")
                 if focus_classes:
                     det_dicts = [d for d in det_dicts if d["class_name"] in focus_classes]
                 pose_keypoints = _extract_pose_keypoints(frame) if learning_mode in ("action_only", "action_and_object") else []

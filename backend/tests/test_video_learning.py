@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.video_learning import AnalyzedFrame, extract_actions
-from app.models.models import ActionSequence, LearningSession, VideoTemplate
+from app.models.models import ActionSequence, LearningSession, Model, VideoTemplate
 
 
 @pytest.mark.asyncio
@@ -498,3 +498,154 @@ async def test_get_session_frame_overlays_supports_range_stride_limit_and_empty(
     )
     assert empty_resp.status_code == 200
     assert empty_resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_update_template_config_returns_custom_training_model_fields(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    manager_token: str,
+):
+    template = VideoTemplate(
+        name="Custom Model Template",
+        description="custom model config",
+        video_path="/tmp/custom-model-template.mp4",
+        business_type="assembly",
+        status="pending",
+    )
+    db_session.add(template)
+    await db_session.commit()
+
+    payload = {
+        "learning_config": {
+            "learning_mode": "action_and_object",
+            "focus_classes": ["hand", "book"],
+            "object_model_id": 11,
+            "action_model_id": 22,
+            "object_category_ids": [1, 2],
+        }
+    }
+
+    resp = await client.put(
+        f"/api/video-learning/templates/{template.id}/config",
+        json=payload,
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["learning_config"]["object_model_id"] == 11
+    assert data["learning_config"]["action_model_id"] == 22
+    assert data["learning_config"]["object_category_ids"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_start_learning_uses_custom_model_outputs_in_analysis(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    manager_token: str,
+    monkeypatch,
+):
+    template = VideoTemplate(
+        name="Custom Inference Template",
+        description="custom inference",
+        video_path="/tmp/custom-inference.mp4",
+        business_type="assembly",
+        status="pending",
+    )
+    db_session.add(template)
+
+    object_model = Model(
+        name="custom-object-model",
+        version="v1",
+        model_type="custom_object",
+        model_path="/tmp/custom-object.pt",
+        status="deployed",
+        is_active=True,
+    )
+    action_model = Model(
+        name="custom-action-model",
+        version="v1",
+        model_type="custom_action",
+        model_path="/tmp/custom-action.json",
+        status="deployed",
+        is_active=True,
+    )
+    db_session.add_all([object_model, action_model])
+    await db_session.commit()
+
+    monkeypatch.setattr("app.api.video_learning.os.path.isfile", lambda path: True)
+
+    class Meta:
+        fps = 10.0
+        frame_count = 20
+        duration_seconds = 2.0
+        resolution = "1280x720"
+
+    monkeypatch.setattr("app.api.video_learning.get_video_metadata", lambda path: Meta())
+
+    analyzed_frames = [
+        AnalyzedFrame(
+            frame_number=0,
+            timestamp=0.0,
+            detections=[
+                {
+                    "class_name": "custom_book",
+                    "confidence": 0.93,
+                    "bbox": [10, 10, 40, 40],
+                    "model_source": "custom_object",
+                }
+            ],
+            pose_keypoints=[],
+            interaction_summary={"interaction_count": 1},
+            scene_change_score=0.0,
+            is_boundary=False,
+            image_path="/tmp/frame0.jpg",
+        )
+    ]
+
+    def fake_analyze_video_frames(**kwargs):
+        return analyzed_frames
+
+    monkeypatch.setattr("app.api.video_learning.analyze_video_frames", fake_analyze_video_frames)
+
+    payload = {
+        "learning_mode": "action_and_object",
+        "focus_classes": ["custom_book"],
+        "object_model_id": object_model.id,
+        "action_model_id": action_model.id,
+    }
+
+    resp = await client.post(
+        f"/api/video-learning/templates/{template.id}/learn",
+        json=payload,
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert resp.status_code == 201
+    session_id = resp.json()["id"]
+
+    session_resp = await client.get(
+        f"/api/video-learning/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert session_resp.status_code == 200
+    session_data = session_resp.json()
+    assert session_data["status"] == "completed"
+    assert session_data["object_model_id"] == object_model.id
+    assert session_data["action_model_id"] == action_model.id
+
+    actions_resp = await client.get(
+        f"/api/video-learning/sessions/{session_id}/actions",
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert actions_resp.status_code == 200
+    action_features = actions_resp.json()[0]["features"]
+    assert action_features["predicted_action_category"] == "custom_action_step_1"
+    assert action_features["action_model_source"] == "custom_action"
+
+    overlays_resp = await client.get(
+        f"/api/video-learning/sessions/{session_id}/frame-overlays",
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert overlays_resp.status_code == 200
+    assert overlays_resp.json()[0]["objects"][0]["model_source"] == "custom_object"

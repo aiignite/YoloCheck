@@ -1,18 +1,22 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class VideoLearningSchemaBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
 # ── VideoTemplate ──
 
-class VideoTemplateCreate(BaseModel):
+class VideoTemplateCreate(VideoLearningSchemaBase):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     business_type: str = Field(..., pattern=r"^(assembly|welding|inspection|packaging|custom)$")
     station_id: Optional[str] = None
 
 
-class VideoTemplateResponse(BaseModel):
+class VideoTemplateResponse(VideoLearningSchemaBase):
     id: int
     name: str
     description: Optional[str]
@@ -29,12 +33,9 @@ class VideoTemplateResponse(BaseModel):
     status: str
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-
-
 # ── LearningSession ──
 
-class LearningSessionResponse(BaseModel):
+class LearningSessionResponse(VideoLearningSchemaBase):
     id: int
     template_id: int
     status: str
@@ -48,46 +49,174 @@ class LearningSessionResponse(BaseModel):
     sample_rate: Optional[int]
     min_confidence: Optional[float]
     scene_threshold: Optional[float]
+    object_model_id: Optional[int] = None
+    action_model_id: Optional[int] = None
     error_message: Optional[str]
     analysis_result: Optional[dict]
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-
-
-class StartLearningRequest(BaseModel):
+class StartLearningRequest(VideoLearningSchemaBase):
     learning_mode: str = Field(default="action_and_object", pattern=r"^(action_only|object_only|action_and_object)$")
     focus_classes: list[str] = Field(default_factory=list)
     sample_rate: int = Field(default=5, ge=1, le=30, description="每N帧采样一次")
     min_confidence: float = Field(default=0.4, ge=0.1, le=1.0)
     scene_threshold: float = Field(default=30.0, ge=5.0, le=100.0, description="场景变化阈值")
+    object_model_id: Optional[int] = None
+    action_model_id: Optional[int] = None
+    object_category_ids: list[int] = Field(default_factory=list)
 
 
-class VideoLearningConfigUpdate(BaseModel):
+class VideoLearningConfigUpdate(VideoLearningSchemaBase):
     learning_config: dict = Field(default_factory=dict)
 
 
-class ActionSequenceUpdate(BaseModel):
+class ObjectCategoryCreate(VideoLearningSchemaBase):
+    name: str = Field(..., min_length=1, max_length=100)
+    display_name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    color: str = Field(default="#1677ff", max_length=20)
+    icon: Optional[str] = None
+
+
+class ObjectCategoryResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    display_name: str
+    description: Optional[str]
+    color: Optional[str]
+    icon: Optional[str]
+    is_builtin: bool
+    is_active: bool
+    created_at: datetime
+
+class ObjectAnnotationSetCreate(VideoLearningSchemaBase):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    source_type: str = Field(..., pattern=r"^(video_frame|image_upload|imported)$")
+
+
+class ObjectAnnotationSetResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    description: Optional[str]
+    source_type: str
+    status: str
+    created_by: Optional[int]
+    created_at: datetime
+
+class ObjectAnnotationCreate(VideoLearningSchemaBase):
+    image_path: str = Field(..., min_length=1)
+    frame_number: Optional[int] = None
+    source_video_template_id: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    annotations_json: list[dict] = Field(default_factory=list)
+
+
+class ActionCategoryCreate(VideoLearningSchemaBase):
+    name: str = Field(..., min_length=1, max_length=100)
+    display_name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+
+
+class ActionCategoryResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    display_name: str
+    description: Optional[str]
+    is_active: bool
+    created_at: datetime
+
+class ActionSampleSetCreate(VideoLearningSchemaBase):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    source_type: str = Field(..., pattern=r"^(pose_json|video_pose_extract)$")
+
+
+class ActionSampleSetResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    description: Optional[str]
+    source_type: str
+    status: str
+    created_by: Optional[int]
+    created_at: datetime
+
+class ActionSampleImportItem(VideoLearningSchemaBase):
+    action_category_id: int
+    start_frame: Optional[int] = None
+    end_frame: Optional[int] = None
+    duration: Optional[float] = None
+    source_session_id: Optional[int] = None
+    skeleton_sequence_json: dict = Field(default_factory=dict)
+    metadata_json: dict = Field(default_factory=dict)
+
+
+class ActionSampleImportRequest(VideoLearningSchemaBase):
+    samples: list[ActionSampleImportItem] = Field(default_factory=list)
+
+
+class ActionSampleFromSessionRequest(VideoLearningSchemaBase):
+    session_id: int = Field(..., ge=1)
+    action_category_id: Optional[int] = Field(default=None, ge=1)
+
+
+class BatchCreateResponse(VideoLearningSchemaBase):
+    created_count: int
+
+
+class TrainingJobCreateBase(VideoLearningSchemaBase):
+    name: str = Field(..., min_length=1, max_length=200)
+    dataset_id: int = Field(..., ge=1)
+
+
+class ObjectTrainingJobCreate(TrainingJobCreateBase):
+    epochs: int = Field(default=10, ge=1, le=500)
+    image_size: int = Field(default=640, ge=64, le=2048)
+
+
+class ActionTrainingJobCreate(TrainingJobCreateBase):
+    sequence_length: int = Field(default=32, ge=1, le=512)
+
+
+class TrainingJobResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    job_type: str
+    dataset_type: str
+    dataset_id: int
+    model_id: Optional[int]
+    status: str
+    progress: float
+    config_json: Optional[dict]
+    metrics_json: Optional[dict]
+    log_path: Optional[str]
+    error_message: Optional[str]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    created_at: datetime
+
+class ActionSequenceUpdate(VideoLearningSchemaBase):
     user_defined_name: Optional[str] = None
     note: Optional[str] = None
     is_kept: Optional[bool] = None
 
 
-class ActionSplitRequest(BaseModel):
+class ActionSplitRequest(VideoLearningSchemaBase):
     target_frame: int = Field(..., ge=0)
 
 
-class ActionMergeRequest(BaseModel):
+class ActionMergeRequest(VideoLearningSchemaBase):
     with_previous: bool = True
 
 
-class ActionSuggestionApplyRequest(BaseModel):
+class ActionSuggestionApplyRequest(VideoLearningSchemaBase):
     suggestion_type: str = Field(..., pattern=r"^(rename|keep)$")
 
 
-class SOPPreviewResponse(BaseModel):
+class SOPPreviewResponse(VideoLearningSchemaBase):
     template_id: int
     title: str
     business_type: str
@@ -96,12 +225,12 @@ class SOPPreviewResponse(BaseModel):
     steps: list[dict] = Field(default_factory=list)
 
 
-class TemplateSOPUpdate(BaseModel):
+class TemplateSOPUpdate(VideoLearningSchemaBase):
     sop_content: dict = Field(default_factory=dict)
     workflow_summary: dict = Field(default_factory=dict)
 
 
-class TemplateCompareResponse(BaseModel):
+class TemplateCompareResponse(VideoLearningSchemaBase):
     source_template_id: int
     target_template_id: int
     source_action_count: int
@@ -110,25 +239,28 @@ class TemplateCompareResponse(BaseModel):
     avg_duration_gap: float
 
 
-class FrameOverlayObjectResponse(BaseModel):
+class FrameOverlayObjectResponse(VideoLearningSchemaBase):
     class_name: str
     confidence: Optional[float] = None
     bbox: list[float] = Field(default_factory=list)
+    model_source: Optional[str] = None
+    model_id: Optional[int] = None
+    model_name: Optional[str] = None
 
 
-class FrameOverlayPosePointResponse(BaseModel):
+class FrameOverlayPosePointResponse(VideoLearningSchemaBase):
     index: int
     x: float
     y: float
     conf: Optional[float] = None
 
 
-class FrameOverlayPoseResponse(BaseModel):
+class FrameOverlayPoseResponse(VideoLearningSchemaBase):
     person_index: int
     points: list[FrameOverlayPosePointResponse] = Field(default_factory=list)
 
 
-class FrameOverlayResponse(BaseModel):
+class FrameOverlayResponse(VideoLearningSchemaBase):
     frame_number: int
     timestamp: float
     image_path: Optional[str] = None
@@ -141,7 +273,7 @@ class FrameOverlayResponse(BaseModel):
 
 # ── ActionSequence ──
 
-class ActionSequenceResponse(BaseModel):
+class ActionSequenceResponse(VideoLearningSchemaBase):
     id: int
     session_id: int
     template_id: int
@@ -163,12 +295,9 @@ class ActionSequenceResponse(BaseModel):
     is_kept: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-
-
 # ── KeyFrame ──
 
-class KeyFrameResponse(BaseModel):
+class KeyFrameResponse(VideoLearningSchemaBase):
     id: int
     session_id: int
     template_id: int
@@ -180,12 +309,9 @@ class KeyFrameResponse(BaseModel):
     is_action_boundary: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-
-
 # ── 学习结果汇总 ──
 
-class LearningSummary(BaseModel):
+class LearningSummary(VideoLearningSchemaBase):
     template: VideoTemplateResponse
     session: LearningSessionResponse
     actions: list[ActionSequenceResponse]

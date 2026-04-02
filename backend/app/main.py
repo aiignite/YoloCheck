@@ -10,8 +10,10 @@ from app.config import get_settings
 from app.database import engine, Base
 from app.models.models import Camera, DetectionEvent, ProductionStats, Alert, Model  # noqa: ensure models registered
 from app.models.models import VideoTemplate, LearningSession, ActionSequence, KeyFrame  # noqa
+from app.models.models import ObjectCategory, ObjectAnnotationSet, ObjectAnnotation  # noqa
+from app.models.models import ActionCategory, ActionSampleSet, ActionSample, TrainingJob  # noqa
 from app.models.models import User, CameraDriver, SystemConfig, MESOrder, StorageRecord, AuditLog, AlertRule  # noqa
-from app.api import cameras, events, alerts, stats, websocket, video_learning
+from app.api import cameras, events, alerts, stats, websocket, video_learning, video_training
 from app.api import users, system, mes, reports, live_monitor, auth, models, batch_analysis, alert_workflow, pipeline, storage
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.metrics_middleware import MetricsMiddleware
@@ -78,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(stats.router, prefix="/api/stats", tags=["统计分析"])
     app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
     app.include_router(video_learning.router, prefix="/api/video-learning", tags=["视频学习"])
+    app.include_router(video_training.router, prefix="/api/video-training", tags=["视频训练"])
     app.include_router(users.router, prefix="/api/users", tags=["用户管理"])
     app.include_router(system.router, prefix="/api/system", tags=["系统设置"])
     app.include_router(mes.router, prefix="/api/mes", tags=["MES接口"])

@@ -12,6 +12,8 @@ sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from app.database import Base
 from app.models.models import Camera, DetectionEvent, ProductionStats, Alert, Model  # noqa
 from app.models.models import VideoTemplate, LearningSession, ActionSequence, KeyFrame  # noqa
+from app.models.models import ObjectCategory, ObjectAnnotationSet, ObjectAnnotation  # noqa
+from app.models.models import ActionCategory, ActionSampleSet, ActionSample, TrainingJob  # noqa
 from app.models.models import User, CameraDriver, SystemConfig, MESOrder, StorageRecord, AuditLog, AlertRule  # noqa
 from app.config import get_settings
 

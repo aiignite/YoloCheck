@@ -1,13 +1,17 @@
 """模型版本管理 Schema"""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class ModelCreate(BaseModel):
+class ModelSchemaBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+
+class ModelCreate(ModelSchemaBase):
     name: str = Field(..., min_length=1, max_length=100)
     version: str = Field(..., min_length=1, max_length=20)
-    model_type: str = Field(..., pattern=r"^(defect|safety|efficiency|pose)$")
+    model_type: str = Field(..., pattern=r"^(defect|safety|efficiency|pose|custom_object|custom_action)$")
     description: str = ""
     model_path: str = ""
     file_size: int = 0
@@ -19,7 +23,7 @@ class ModelCreate(BaseModel):
     inference_speed: Optional[float] = None
 
 
-class ModelUpdate(BaseModel):
+class ModelUpdate(ModelSchemaBase):
     name: Optional[str] = None
     version: Optional[str] = None
     description: Optional[str] = None
@@ -32,7 +36,7 @@ class ModelUpdate(BaseModel):
     status: Optional[str] = None
 
 
-class ModelResponse(BaseModel):
+class ModelResponse(ModelSchemaBase):
     id: int
     name: str
     version: Optional[str]
@@ -51,10 +55,15 @@ class ModelResponse(BaseModel):
     deployed_at: Optional[datetime]
     created_at: Optional[datetime]
 
-    model_config = {"from_attributes": True}
+
+class TrainingModelActivateResponse(ModelSchemaBase):
+    job_id: int
+    model_id: int
+    model_type: str
+    status: str
 
 
-class ModelCompare(BaseModel):
+class ModelCompare(ModelSchemaBase):
     """模型对比结果"""
     model_a: ModelResponse
     model_b: ModelResponse
