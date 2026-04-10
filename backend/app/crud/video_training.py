@@ -1,6 +1,6 @@
 from typing import Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
@@ -8,6 +8,7 @@ from app.models.models import (
     ActionSample,
     ActionSampleSet,
     ActionSequence,
+    KeyFrame,
     ObjectAnnotation,
     ObjectAnnotationSet,
     ObjectCategory,
@@ -166,6 +167,19 @@ async def get_training_job(db: AsyncSession, job_id: int) -> Optional[TrainingJo
     return result.scalar_one_or_none()
 
 
+async def get_training_job_with_model(db: AsyncSession, job_id: int) -> Optional[TrainingJob]:
+    return await get_training_job(db, job_id)
+
+
+async def get_training_job_by_model_id(db: AsyncSession, model_id: int) -> Optional[TrainingJob]:
+    result = await db.execute(
+        select(TrainingJob)
+        .where(TrainingJob.model_id == model_id)
+        .order_by(TrainingJob.created_at.desc())
+    )
+    return result.scalars().first()
+
+
 async def update_training_job(db: AsyncSession, job_id: int, **kwargs) -> Optional[TrainingJob]:
     item = await get_training_job(db, job_id)
     if not item:
@@ -176,3 +190,33 @@ async def update_training_job(db: AsyncSession, job_id: int, **kwargs) -> Option
     await db.commit()
     await db.refresh(item)
     return item
+
+
+async def get_session_keyframes_with_detections(db: AsyncSession, session_id: int) -> Sequence[KeyFrame]:
+    result = await db.execute(
+        select(KeyFrame)
+        .where(
+            KeyFrame.session_id == session_id,
+            KeyFrame.detections.isnot(None),
+        )
+        .order_by(KeyFrame.frame_number)
+    )
+    return result.scalars().all()
+
+
+async def batch_create_object_annotations(db: AsyncSession, annotation_items: list[dict]) -> int:
+    created = 0
+    for item in annotation_items:
+        db.add(ObjectAnnotation(**item))
+        created += 1
+    await db.commit()
+    return created
+
+
+async def get_annotation_count_by_set(db: AsyncSession, annotation_set_id: int) -> int:
+    result = await db.execute(
+        select(func.count(ObjectAnnotation.id)).where(
+            ObjectAnnotation.annotation_set_id == annotation_set_id
+        )
+    )
+    return result.scalar() or 0

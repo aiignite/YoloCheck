@@ -49,6 +49,8 @@ class LearningSessionResponse(VideoLearningSchemaBase):
     sample_rate: Optional[int]
     min_confidence: Optional[float]
     scene_threshold: Optional[float]
+    min_action_duration_seconds: Optional[float] = None
+    object_change_sensitivity: Optional[str] = None
     object_model_id: Optional[int] = None
     action_model_id: Optional[int] = None
     error_message: Optional[str]
@@ -63,6 +65,8 @@ class StartLearningRequest(VideoLearningSchemaBase):
     sample_rate: int = Field(default=5, ge=1, le=30, description="每N帧采样一次")
     min_confidence: float = Field(default=0.4, ge=0.1, le=1.0)
     scene_threshold: float = Field(default=30.0, ge=5.0, le=100.0, description="场景变化阈值")
+    min_action_duration_seconds: float = Field(default=1.0, ge=0.1, le=10.0)
+    object_change_sensitivity: str = Field(default="medium", pattern=r"^(low|medium|high)$")
     object_model_id: Optional[int] = None
     action_model_id: Optional[int] = None
     object_category_ids: list[int] = Field(default_factory=list)
@@ -113,6 +117,11 @@ class ObjectAnnotationCreate(VideoLearningSchemaBase):
     width: Optional[int] = None
     height: Optional[int] = None
     annotations_json: list[dict] = Field(default_factory=list)
+
+
+class ObjectAnnotationFromSessionRequest(VideoLearningSchemaBase):
+    session_id: int = Field(..., ge=1)
+    min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class ActionCategoryCreate(VideoLearningSchemaBase):
@@ -198,8 +207,76 @@ class TrainingJobResponse(VideoLearningSchemaBase):
     completed_at: Optional[datetime]
     created_at: datetime
 
+
+class TrainingJobTimelineItemResponse(VideoLearningSchemaBase):
+    status: str
+    label: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+
+class TrainingJobArtifactSummaryResponse(VideoLearningSchemaBase):
+    file_name: Optional[str] = None
+    file_path: Optional[str] = None
+    relative_path: Optional[str] = None
+    file_size: Optional[int] = None
+    exists: bool = False
+    download_url: Optional[str] = None
+
+
+class TrainingJobLogSummaryResponse(VideoLearningSchemaBase):
+    file_path: Optional[str] = None
+    relative_path: Optional[str] = None
+    exists: bool = False
+    line_count: int = 0
+    tail_lines: list[str] = Field(default_factory=list)
+    view_url: Optional[str] = None
+
+
+class TrainingJobRuntimeSummaryResponse(VideoLearningSchemaBase):
+    epochs: Optional[int] = None
+    image_size: Optional[int] = None
+    sequence_length: Optional[int] = None
+    class_count: Optional[int] = None
+    accuracy: Optional[float] = None
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+    map50: Optional[float] = None
+    map50_95: Optional[float] = None
+    inference_speed: Optional[float] = None
+
+
+class TrainingJobDetailResponse(VideoLearningSchemaBase):
+    job: TrainingJobResponse
+    model: dict = Field(default_factory=dict)
+    runtime_summary: TrainingJobRuntimeSummaryResponse
+    dataset_summary: dict = Field(default_factory=dict)
+    artifact_summary: TrainingJobArtifactSummaryResponse
+    log_summary: TrainingJobLogSummaryResponse
+    status_timeline: list[TrainingJobTimelineItemResponse] = Field(default_factory=list)
+
+
+class TrainingEvaluationJobResponse(VideoLearningSchemaBase):
+    id: int
+    name: str
+    job_type: str
+    dataset_type: str
+    dataset_id: int
+    status: str
+    progress: float
+    metrics_json: Optional[dict]
+    log_path: Optional[str]
+    completed_at: Optional[datetime]
+    created_at: datetime
+
+
+class TrainingEvaluationItemResponse(VideoLearningSchemaBase):
+    model: dict = Field(default_factory=dict)
+    job: Optional[TrainingEvaluationJobResponse] = None
+
 class ActionSequenceUpdate(VideoLearningSchemaBase):
     user_defined_name: Optional[str] = None
+    start_time: Optional[float] = Field(default=None, ge=0)
+    end_time: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
     is_kept: Optional[bool] = None
 

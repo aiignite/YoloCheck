@@ -41,6 +41,7 @@ const MainLayout: React.FC = () => {
     { key: '/statistics', icon: <BarChartOutlined />, label: t('menu.statistics') },
     { key: '/video-learning', icon: <VideoCameraOutlined />, label: t('menu.videoLearning') },
     { key: '/video-training', icon: <AppstoreOutlined />, label: t('menu.videoTraining') },
+    { key: '/video-training/evaluation', icon: <BarChartOutlined />, label: t('menu.videoTrainingEvaluation') },
     { key: '/mes', icon: <ScheduleOutlined />, label: t('menu.mes') },
     { key: '/models', icon: <AppstoreOutlined />, label: t('menu.models') },
     { key: '/batch-analysis', icon: <CloudServerOutlined />, label: t('menu.batchAnalysis') },

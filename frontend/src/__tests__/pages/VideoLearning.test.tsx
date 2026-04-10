@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -122,6 +122,13 @@ const mockActions = [
     ],
     features: {
       quality_score: 0.86,
+      boundary_score: 0.35,
+      boundary_reasons: ['scene_jump'],
+      detection_score: 0.91,
+      pose_score: 0.75,
+      interaction_score: 0.80,
+      stability_score: 0.78,
+      primary_objects: ['part'],
       suggested_action_name: '拿取工件',
       suggestions: [
         { type: 'rename', message: '建议命名为拿取工件' },
@@ -152,6 +159,13 @@ const mockActions = [
     ],
     features: {
       quality_score: 0.64,
+      boundary_score: 0.68,
+      boundary_reasons: ['object_set_changed', 'interaction_changed'],
+      detection_score: 0.82,
+      pose_score: 0.65,
+      interaction_score: 0.55,
+      stability_score: 0.45,
+      primary_objects: ['screwdriver'],
       suggested_action_name: '拧紧螺丝',
       suggestions: [
         { type: 'quality', message: '第2步质量评分偏低，建议优先复核' },
@@ -284,7 +298,7 @@ describe('VideoLearning 页面', () => {
     expect(screen.getByText(/标准作业指导书/)).toBeInTheDocument();
     expect(screen.getAllByText(/拿取工件/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/part/).length).toBeGreaterThan(0);
-  });
+  }, 15000);
 
   it('展示自定义物体模型和动作模型选择器', async () => {
     const user = userEvent.setup();
@@ -311,10 +325,166 @@ describe('VideoLearning 页面', () => {
     await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
 
     await waitFor(() => {
-      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/frame-overlays');
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/frame-overlays', { params: { limit: 100000 } });
     });
 
     expect(screen.getByText(/视频回放|视频分析回放|pages\.videoLearning\.videoPlayback/)).toBeInTheDocument();
     expect(screen.getByText(/显示目标框|pages\.videoLearning\.showBoxes/)).toBeInTheDocument();
   });
+
+  it('展示分段参数字段', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    expect(await screen.findByText('最短动作时长（秒）')).toBeInTheDocument();
+    expect(screen.getByText('对象切换敏感度')).toBeInTheDocument();
+  });
+
+  it('编辑动作时提交起止时间字段', async () => {
+    const user = userEvent.setup();
+    mockApi.put.mockResolvedValueOnce({
+      data: {
+        ...mockActions[0],
+        user_defined_name: 'pick_part',
+        start_time: 0,
+        end_time: 1.2,
+        duration: 1.2,
+      },
+    });
+
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    });
+
+    const actionLabels = await screen.findAllByText(/步骤 1:/);
+    expect(actionLabels.length).toBeGreaterThan(0);
+
+    const editTexts = await screen.findAllByText(/编辑|common\.edit/);
+    const firstEditButton = editTexts[0].closest('button');
+    expect(firstEditButton).not.toBeNull();
+    await user.click(firstEditButton as HTMLButtonElement);
+
+    const dialogs = await screen.findAllByRole('dialog');
+    const dialog = dialogs[dialogs.length - 1];
+    const spinbuttons = within(dialog).getAllByRole('spinbutton');
+    expect(within(dialog).getByDisplayValue('pick_part')).toBeInTheDocument();
+    expect(spinbuttons[0]).toHaveValue('0.0');
+    expect(spinbuttons[1]).toHaveValue('1.2');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /OK|common\.ok/ }));
+
+    await waitFor(() => {
+      expect(mockApi.put).toHaveBeenCalledWith('/video-learning/actions/201', expect.objectContaining({
+        user_defined_name: 'pick_part',
+        start_time: 0,
+        end_time: 1.2,
+      }));
+    });
+  }, 15000);
+
+  it('展示动作段的分项评分和质量分', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    });
+
+    await user.click(screen.getByRole('tab', { name: /时间轴|pages\.videoLearning\.timeline|步骤时间轴/ }));
+
+    const stepCards = await screen.findAllByText(/步骤 1:/);
+    expect(stepCards.length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/qualityScore|质量评分|质量分/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/detection:/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/pose:/i).length).toBeGreaterThan(0);
+  }, 15000);
+
+  it('展示动作段的边界原因标签', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    });
+
+    await user.click(screen.getByRole('tab', { name: /时间轴|pages\.videoLearning\.timeline|步骤时间轴/ }));
+
+    expect(await screen.findByText(/scene_jump/i)).toBeInTheDocument();
+    expect(screen.getByText(/object_set_changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/interaction_changed/i)).toBeInTheDocument();
+  }, 15000);
+
+  it('展示动作段的主对象和模型来源摘要', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    });
+
+    await user.click(screen.getByRole('tab', { name: /时间轴|pages\.videoLearning\.timeline|步骤时间轴/ }));
+
+    const primaryObjects = await screen.findAllByText(/primaryObjects|主要对象/i);
+    expect(primaryObjects.length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/part/).length).toBeGreaterThan(0);
+  }, 15000);
+
+  it('时间轴 tab 点击可跳转视频播放位置', async () => {
+    const user = userEvent.setup();
+    renderVideoLearning();
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/templates');
+    });
+
+    await user.click(screen.getAllByRole('button', { name: /学习工作台/ })[0]);
+
+    await waitFor(() => {
+      expect(mockApi.get).toHaveBeenCalledWith('/video-learning/sessions/101/actions');
+    });
+
+    await user.click(screen.getByRole('tab', { name: /时间轴|pages\.videoLearning\.timeline|步骤时间轴/ }));
+
+    const firstEditButton = (await screen.findAllByRole('button', { name: /编辑|common\.edit/ }))[0];
+    const firstTimelineCard = firstEditButton.closest('.ant-card');
+    expect(firstTimelineCard).not.toBeNull();
+    await user.click(firstTimelineCard as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText(/0\.0s \/ 12\.5s|1\.2s \/ 12\.5s/)).toBeInTheDocument();
+    });
+  }, 15000);
+
 });

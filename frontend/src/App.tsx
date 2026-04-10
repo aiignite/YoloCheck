@@ -1,23 +1,34 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import MainLayout from './layouts/MainLayout';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Cameras from './pages/Cameras';
-import Alerts from './pages/Alerts';
-import Statistics from './pages/Statistics';
-import VideoLearning from './pages/VideoLearning';
-import LiveMonitor from './pages/LiveMonitor';
-import Users from './pages/Users';
-import MES from './pages/MES';
-import Settings from './pages/Settings';
-import AuditLogs from './pages/AuditLogs';
-import ModelManager from './pages/ModelManager';
-import VideoTraining from './pages/VideoTraining';
-import BatchAnalysis from './pages/BatchAnalysis';
-import AlertWorkflow from './pages/AlertWorkflow';
-import StorageManage from './pages/StorageManage';
 import { Spin } from 'antd';
+
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Cameras = lazy(() => import('./pages/Cameras'));
+const Alerts = lazy(() => import('./pages/Alerts'));
+const Statistics = lazy(() => import('./pages/Statistics'));
+const VideoLearning = lazy(() => import('./pages/VideoLearning'));
+const LiveMonitor = lazy(() => import('./pages/LiveMonitor'));
+const Users = lazy(() => import('./pages/Users'));
+const MES = lazy(() => import('./pages/MES'));
+const Settings = lazy(() => import('./pages/Settings'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+const ModelManager = lazy(() => import('./pages/ModelManager'));
+const VideoTraining = lazy(() => import('./pages/VideoTraining'));
+const VideoTrainingEvaluation = lazy(() => import('./pages/VideoTrainingEvaluation'));
+const BatchAnalysis = lazy(() => import('./pages/BatchAnalysis'));
+const AlertWorkflow = lazy(() => import('./pages/AlertWorkflow'));
+const StorageManage = lazy(() => import('./pages/StorageManage'));
+
+function PageFallback() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '40vh', fontSize: 16 }}>
+      页面加载中...
+    </div>
+  );
+}
 
 function ProtectedRoutes() {
   const { isAuthenticated, loading } = useAuth();
@@ -30,26 +41,29 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedRoutes />}>
-            <Route index element={<Dashboard />} />
-            <Route path="live-monitor" element={<LiveMonitor />} />
-            <Route path="cameras" element={<Cameras />} />
-            <Route path="alerts" element={<Alerts />} />
-            <Route path="statistics" element={<Statistics />} />
-            <Route path="video-learning" element={<VideoLearning />} />
-            <Route path="users" element={<Users />} />
-            <Route path="mes" element={<MES />} />
-            <Route path="models" element={<ModelManager />} />
-            <Route path="video-training" element={<VideoTraining />} />
-            <Route path="batch-analysis" element={<BatchAnalysis />} />
-            <Route path="alert-workflow" element={<AlertWorkflow />} />
-            <Route path="storage" element={<StorageManage />} />
-            <Route path="audit-logs" element={<AuditLogs />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedRoutes />}>
+              <Route index element={<Dashboard />} />
+              <Route path="live-monitor" element={<LiveMonitor />} />
+              <Route path="cameras" element={<Cameras />} />
+              <Route path="alerts" element={<Alerts />} />
+              <Route path="statistics" element={<Statistics />} />
+              <Route path="video-learning" element={<VideoLearning />} />
+              <Route path="users" element={<Users />} />
+              <Route path="mes" element={<MES />} />
+              <Route path="models" element={<ModelManager />} />
+              <Route path="video-training" element={<VideoTraining />} />
+              <Route path="video-training/evaluation" element={<VideoTrainingEvaluation />} />
+              <Route path="batch-analysis" element={<BatchAnalysis />} />
+              <Route path="alert-workflow" element={<AlertWorkflow />} />
+              <Route path="storage" element={<StorageManage />} />
+              <Route path="audit-logs" element={<AuditLogs />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </AuthProvider>
   );

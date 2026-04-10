@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import React from 'react';
 
 // Mock api before importing components
 vi.mock('../utils/api', () => ({
@@ -12,6 +13,18 @@ vi.mock('../utils/api', () => ({
   },
 }));
 
+vi.mock('../contexts/AuthContext', () => ({
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useAuth: () => ({
+    user: { id: 1, username: 'manager', display_name: 'Manager', role: 'manager' },
+    token: 'test-token',
+    isAuthenticated: true,
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
+
 import { Routes, Route } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import Dashboard from '../pages/Dashboard';
@@ -19,6 +32,7 @@ import Cameras from '../pages/Cameras';
 import Alerts from '../pages/Alerts';
 import Statistics from '../pages/Statistics';
 import Settings from '../pages/Settings';
+import App from '../App';
 
 function TestApp({ initialEntry = '/' }: { initialEntry?: string }) {
   return (
@@ -65,5 +79,17 @@ describe('App路由', () => {
   it('导航到设置页', () => {
     render(<TestApp initialEntry="/settings" />);
     expect(screen.getByText('系统配置')).toBeInTheDocument();
+  });
+
+  it('真实App访问重页面路由时先显示统一加载态', async () => {
+    window.history.pushState({}, '', '/video-training');
+
+    render(<App />);
+
+    expect(screen.getByText('页面加载中...')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('自定义训练工作台')).toBeInTheDocument();
+    });
   });
 });

@@ -44,6 +44,8 @@ interface LearningSession {
   sample_rate?: number | null;
   min_confidence?: number | null;
   scene_threshold?: number | null;
+  min_action_duration_seconds?: number | null;
+  object_change_sensitivity?: string | null;
   error_message: string | null;
   analysis_result: Record<string, any> | null;
   started_at: string | null;
@@ -86,7 +88,7 @@ interface ModelOption {
   model_type: string;
 }
 
-const defaultFocusClasses = ['screwdriver', 'product', 'hand'];
+const defaultFocusClasses: string[] = [];
 
 export default function VideoLearning() {
   const [templates, setTemplates] = useState<VideoTemplate[]>([]);
@@ -113,6 +115,7 @@ export default function VideoLearning() {
   const [actionModels, setActionModels] = useState<ModelOption[]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { t } = useTranslation();
 
   const resolveAssetUrl = useCallback((path?: string | null) => {
@@ -183,7 +186,9 @@ export default function VideoLearning() {
         sample_rate: tpl.learning_config?.sample_rate || 5,
         min_confidence: tpl.learning_config?.min_confidence || 0.4,
         scene_threshold: tpl.learning_config?.scene_threshold || 30,
-        focus_classes: tpl.learning_config?.focus_classes || defaultFocusClasses,
+        min_action_duration_seconds: tpl.learning_config?.min_action_duration_seconds || 1,
+        object_change_sensitivity: tpl.learning_config?.object_change_sensitivity || 'medium',
+        focus_classes: tpl.learning_config?.focus_classes ?? defaultFocusClasses,
         object_model_id: tpl.learning_config?.object_model_id,
         action_model_id: tpl.learning_config?.action_model_id,
         object_category_ids: tpl.learning_config?.object_category_ids || [],
@@ -192,10 +197,10 @@ export default function VideoLearning() {
     try {
       const sessRes = await api.get(`/video-learning/templates/${tpl.id}/sessions`);
       setSessions(sessRes.data);
-      const completed = (sessRes.data as LearningSession[]).find((s) => s.status === 'completed') || sessRes.data[0];
-      if (completed) {
-        const actRes = await api.get(`/video-learning/sessions/${completed.id}/actions`);
-        const overlayRes = await api.get(`/video-learning/sessions/${completed.id}/frame-overlays`);
+      const fresh = (sessRes.data as LearningSession[])[0];
+      if (fresh && fresh.status === 'completed') {
+        const actRes = await api.get(`/video-learning/sessions/${fresh.id}/actions`);
+        const overlayRes = await api.get(`/video-learning/sessions/${fresh.id}/frame-overlays`, { params: { limit: 100000 } });
         setActions(actRes.data);
         setOverlayFrames(overlayRes.data);
         const sopRes = await api.post(`/video-learning/templates/${tpl.id}/sop-preview`);
@@ -258,7 +263,8 @@ export default function VideoLearning() {
       message.success(t('pages.videoLearning.learningStarted'));
       fetchTemplates();
       if (selectedTemplate) {
-        openWorkbench(selectedTemplate);
+        const sessRes = await api.get(`/video-learning/templates/${templateId}/sessions`);
+        setSessions(sessRes.data);
       }
     } catch {
       message.error(t('pages.videoLearning.startLearningFailed'));
@@ -271,6 +277,8 @@ export default function VideoLearning() {
     setTimeout(() => {
       editActionForm.setFieldsValue({
         user_defined_name: action.user_defined_name || action.action_name,
+        start_time: action.start_time,
+        end_time: action.end_time,
         note: action.note || '',
         is_kept: action.is_kept,
       });
@@ -335,7 +343,7 @@ export default function VideoLearning() {
     }
   };
 
-  const latestSession = sessions.find((s) => s.status === 'completed') || sessions[0];
+  const latestSession = sessions[0];
   const objectFrequency = latestSession?.analysis_result?.analysis?.object_frequency || {};
   const workflowSummary = latestSession?.analysis_result?.workflow_summary || selectedTemplate?.workflow_summary || {};
   const workflowSuggestions = latestSession?.analysis_result?.workflow_suggestions || [];
@@ -351,6 +359,30 @@ export default function VideoLearning() {
       return Math.abs(frame.timestamp - currentTime) < Math.abs(closest.timestamp - currentTime) ? frame : closest;
     }, null);
   }, [overlayFrames, currentTime]);
+
+  const getOverlayTransform = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return null;
+    const displayWidth = video.clientWidth || 0;
+    const displayHeight = video.clientHeight || 0;
+    const [resolutionWidth, resolutionHeight] = (selectedTemplate?.resolution || '0x0').split('x').map(Number);
+    const sourceWidth = video.videoWidth || resolutionWidth || displayWidth;
+    const sourceHeight = video.videoHeight || resolutionHeight || displayHeight;
+    if (!displayWidth || !displayHeight || !sourceWidth || !sourceHeight) return null;
+    const scale = Math.min(displayWidth / sourceWidth, displayHeight / sourceHeight);
+    const renderWidth = sourceWidth * scale;
+    const renderHeight = sourceHeight * scale;
+    return {
+      sourceWidth,
+      sourceHeight,
+      displayWidth,
+      displayHeight,
+      scaleX: renderWidth / sourceWidth,
+      scaleY: renderHeight / sourceHeight,
+      offsetX: (displayWidth - renderWidth) / 2,
+      offsetY: (displayHeight - renderHeight) / 2,
+    };
+  }, [selectedTemplate?.resolution]);
   const currentAction = useMemo(() => {
     return actions.find((action) => {
       if (action.start_time == null || action.end_time == null) return false;
@@ -359,11 +391,52 @@ export default function VideoLearning() {
   }, [actions, currentTime]);
 
   useEffect(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (!selectedTemplate || !latestSession) return;
+    if (latestSession.status !== 'running' && latestSession.status !== 'analyzing') return;
+    pollingRef.current = setInterval(async () => {
+      try {
+        const sessRes = await api.get(`/video-learning/templates/${selectedTemplate.id}/sessions`);
+        const updatedSessions = sessRes.data as LearningSession[];
+        setSessions(updatedSessions);
+        const fresh = updatedSessions[0];
+        if (fresh && fresh.status !== 'running' && fresh.status !== 'analyzing') {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          fetchTemplates();
+          if (fresh.status === 'completed') {
+            const actRes = await api.get(`/video-learning/sessions/${fresh.id}/actions`);
+            const overlayRes = await api.get(`/video-learning/sessions/${fresh.id}/frame-overlays`, { params: { limit: 100000 } });
+            setActions(actRes.data);
+            setOverlayFrames(overlayRes.data);
+            try {
+              const sopRes = await api.post(`/video-learning/templates/${selectedTemplate.id}/sop-preview`);
+              setSopPreview(sopRes.data);
+            } catch { /* sop preview optional */ }
+          }
+        }
+      } catch { /* ignore polling errors */ }
+    }, 3000);
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [selectedTemplate, latestSession?.status]);
+
+  useEffect(() => {
     const video = videoRef.current;
     const canvas = overlayCanvasRef.current;
     if (!video || !canvas) return;
-    const width = video.clientWidth || 0;
-    const height = video.clientHeight || 0;
+    const transform = getOverlayTransform();
+    const width = transform?.displayWidth || 0;
+    const height = transform?.displayHeight || 0;
     if (!width || !height) return;
 
     canvas.width = width;
@@ -377,10 +450,16 @@ export default function VideoLearning() {
         const bbox = Array.isArray(obj.bbox) ? obj.bbox : [];
         if (bbox.length !== 4) return;
         const [x1, y1, x2, y2] = bbox;
-        const left = x1 <= 1 ? x1 * width : x1;
-        const top = y1 <= 1 ? y1 * height : y1;
-        const right = x2 <= 1 ? x2 * width : x2;
-        const bottom = y2 <= 1 ? y2 * height : y2;
+        const sourceWidth = transform?.sourceWidth || width;
+        const sourceHeight = transform?.sourceHeight || height;
+        const rawLeft = x1 <= 1 ? x1 * sourceWidth : x1;
+        const rawTop = y1 <= 1 ? y1 * sourceHeight : y1;
+        const rawRight = x2 <= 1 ? x2 * sourceWidth : x2;
+        const rawBottom = y2 <= 1 ? y2 * sourceHeight : y2;
+        const left = (transform?.offsetX || 0) + rawLeft * (transform?.scaleX || 1);
+        const top = (transform?.offsetY || 0) + rawTop * (transform?.scaleY || 1);
+        const right = (transform?.offsetX || 0) + rawRight * (transform?.scaleX || 1);
+        const bottom = (transform?.offsetY || 0) + rawBottom * (transform?.scaleY || 1);
         ctx.strokeStyle = '#00b96b';
         ctx.lineWidth = 2;
         ctx.strokeRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1));
@@ -411,21 +490,27 @@ export default function VideoLearning() {
           const p1 = pointMap.get(start);
           const p2 = pointMap.get(end);
           if (!p1 || !p2) return;
+          const mappedX1 = (transform?.offsetX || 0) + p1.x * (transform?.scaleX || 1);
+          const mappedY1 = (transform?.offsetY || 0) + p1.y * (transform?.scaleY || 1);
+          const mappedX2 = (transform?.offsetX || 0) + p2.x * (transform?.scaleX || 1);
+          const mappedY2 = (transform?.offsetY || 0) + p2.y * (transform?.scaleY || 1);
           ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
+          ctx.moveTo(mappedX1, mappedY1);
+          ctx.lineTo(mappedX2, mappedY2);
           ctx.stroke();
         });
 
         points.forEach((point) => {
+          const mappedX = (transform?.offsetX || 0) + point.x * (transform?.scaleX || 1);
+          const mappedY = (transform?.offsetY || 0) + point.y * (transform?.scaleY || 1);
           ctx.fillStyle = '#1677ff';
           ctx.beginPath();
-          ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+          ctx.arc(mappedX, mappedY, 3, 0, Math.PI * 2);
           ctx.fill();
         });
       });
     }
-  }, [currentOverlayFrame, showBoxes, showPose, currentTime]);
+  }, [currentOverlayFrame, showBoxes, showPose, currentTime, getOverlayTransform]);
 
   const togglePlayback = () => {
     const video = videoRef.current;
@@ -567,6 +652,18 @@ export default function VideoLearning() {
                   <Form.Item name="scene_threshold" label={t('pages.videoLearning.sceneThreshold')}>
                     <InputNumber min={5} max={100} style={{ width: '100%' }} />
                   </Form.Item>
+                  <Form.Item name="min_action_duration_seconds" label={t('pages.videoLearning.minActionDurationSeconds')}>
+                    <InputNumber min={0.1} max={10} step={0.1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="object_change_sensitivity" label={t('pages.videoLearning.objectChangeSensitivity')}>
+                    <Select
+                      options={[
+                        { value: 'low', label: t('pages.videoLearning.sensitivityLow') },
+                        { value: 'medium', label: t('pages.videoLearning.sensitivityMedium') },
+                        { value: 'high', label: t('pages.videoLearning.sensitivityHigh') },
+                      ]}
+                    />
+                  </Form.Item>
                   <Form.Item name="focus_classes" label={t('pages.videoLearning.focusClasses')}>
                     <Select mode="tags" tokenSeparators={[',']} placeholder={t('pages.videoLearning.focusClassesPlaceholder')} />
                   </Form.Item>
@@ -685,9 +782,19 @@ export default function VideoLearning() {
                     <Col span={6}><Card size="small"><Statistic title={t('common.status')} value={latestSession.status} /></Card></Col>
                   </Row>
 
-                  {latestSession.status === 'running' && (
+                  {(latestSession.status === 'running' || latestSession.status === 'analyzing') && (
                     <Card size="small" style={{ marginTop: 16 }}>
-                      <Progress percent={latestSession.progress} status="active" />
+                      <Progress percent={latestSession.progress ?? 0} status="active" />
+                      <div style={{ textAlign: 'center', color: '#888', marginTop: 4 }}>
+                        {t('pages.videoLearning.learningInProgress')}
+                      </div>
+                    </Card>
+                  )}
+
+                  {latestSession.status === 'failed' && latestSession.error_message && (
+                    <Card size="small" style={{ marginTop: 16, borderColor: '#ffccc7' }}>
+                      <div style={{ color: '#cf1322', fontWeight: 500 }}>学习失败</div>
+                      <div style={{ marginTop: 8 }}>{latestSession.error_message}</div>
                     </Card>
                   )}
 
@@ -727,6 +834,25 @@ export default function VideoLearning() {
                                       <Space wrap>
                                         {action.objects_in_scene?.map((obj: string) => <Tag key={obj}>{obj}</Tag>)}
                                       </Space>
+                                      {(action.features?.boundary_score != null || action.features?.detection_score != null || action.features?.pose_score != null || action.features?.interaction_score != null || action.features?.stability_score != null) && (
+                                        <Space wrap size={[4, 4]}>
+                                          {action.features?.boundary_score != null && <Tag color="purple">boundary: {typeof action.features?.boundary_score === 'number' ? action.features?.boundary_score.toFixed(2) : action.features?.boundary_score}</Tag>}
+                                          {action.features?.detection_score != null && <Tag color="cyan">detection: {typeof action.features?.detection_score === 'number' ? action.features?.detection_score.toFixed(2) : action.features?.detection_score}</Tag>}
+                                          {action.features?.pose_score != null && <Tag color="blue">pose: {typeof action.features?.pose_score === 'number' ? action.features?.pose_score.toFixed(2) : action.features?.pose_score}</Tag>}
+                                          {action.features?.interaction_score != null && <Tag color="green">interaction: {typeof action.features?.interaction_score === 'number' ? action.features?.interaction_score.toFixed(2) : action.features?.interaction_score}</Tag>}
+                                          {action.features?.stability_score != null && <Tag color="orange">stability: {typeof action.features?.stability_score === 'number' ? action.features?.stability_score.toFixed(2) : action.features?.stability_score}</Tag>}
+                                        </Space>
+                                      )}
+                                      {action.features?.boundary_reasons?.length > 0 && (
+                                        <Space wrap size={[4, 4]}>
+                                          {action.features?.boundary_reasons?.map((reason: string) => (
+                                            <Tag key={`reason-${reason}`} color="red">{reason}</Tag>
+                                          ))}
+                                        </Space>
+                                      )}
+                                      {action.features?.primary_objects?.length > 0 && (
+                                        <span>{t('pages.videoLearning.primaryObjects')}: {(action.features?.primary_objects as string[])?.join(', ')}</span>
+                                      )}
                                     </Flex>
                                     <Space>
                                       <Button size="small" icon={<EditOutlined />} onClick={(event) => { event.stopPropagation(); openActionEdit(action); }}>
@@ -914,6 +1040,12 @@ export default function VideoLearning() {
         <Form form={editActionForm} layout="vertical">
           <Form.Item name="user_defined_name" label={t('pages.videoLearning.actionName')} rules={[{ required: true }]}>
             <Input />
+          </Form.Item>
+          <Form.Item name="start_time" label={t('pages.videoLearning.actionStartTime')}>
+            <InputNumber min={0} step={0.1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="end_time" label={t('pages.videoLearning.actionEndTime')}>
+            <InputNumber min={0} step={0.1} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="note" label={t('common.description')}>
             <Input.TextArea rows={3} />

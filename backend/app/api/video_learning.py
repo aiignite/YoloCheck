@@ -216,7 +216,8 @@ async def _run_learning(
 
             meta = get_video_metadata(video_path)
 
-            # 进度回调
+            loop = asyncio.get_running_loop()
+
             async def update_progress(processed: int, total: int):
                 progress = min(round(processed / total * 100, 1), 99.0) if total > 0 else 0
                 await crud.update_session(
@@ -226,8 +227,13 @@ async def _run_learning(
                     total_frames=total,
                 )
 
-            # 在线程池中运行同步的视频分析
-            loop = asyncio.get_running_loop()
+            def sync_progress_callback(processed: int, total: int):
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        update_progress(processed, total), loop)
+                    fut.result(timeout=5)
+                except Exception:
+                    pass
 
             def sync_analyze():
                 return analyze_video_frames(
@@ -240,6 +246,7 @@ async def _run_learning(
                     min_confidence=params.get("min_confidence", 0.4),
                     scene_threshold=params.get("scene_threshold", 30.0),
                     object_model=object_model,
+                    progress_callback=sync_progress_callback,
                 )
 
             analyzed_frames = await loop.run_in_executor(_executor, sync_analyze)
@@ -251,7 +258,12 @@ async def _run_learning(
                         det.setdefault("model_name", object_model.get("name"))
 
             # 提取动作序列
-            actions = extract_actions(analyzed_frames, meta.fps)
+            actions = extract_actions(
+                analyzed_frames,
+                meta.fps,
+                min_action_duration_seconds=params.get("min_action_duration_seconds", 1.0),
+                object_change_sensitivity=params.get("object_change_sensitivity", "medium"),
+            )
             actions = apply_custom_action_model(actions, action_model)
 
             # 保存关键帧到数据库
@@ -352,6 +364,8 @@ async def start_learning(
         sample_rate=params.sample_rate,
         min_confidence=params.min_confidence,
         scene_threshold=params.scene_threshold,
+        min_action_duration_seconds=params.min_action_duration_seconds,
+        object_change_sensitivity=params.object_change_sensitivity,
         object_model_id=params.object_model_id,
         action_model_id=params.action_model_id,
     )
@@ -400,7 +414,7 @@ async def get_session_frame_overlays(
     start_time: float | None = None,
     end_time: float | None = None,
     stride: int = 1,
-    limit: int = 300,
+    limit: int = 100000,
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -425,7 +439,10 @@ async def update_action_sequence(
     _user: User = Depends(require_role("manager")),
     db: AsyncSession = Depends(get_db),
 ):
-    action = await crud.update_action(db, action_id, **payload.model_dump())
+    try:
+        action = await crud.update_action(db, action_id, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not action:
         raise HTTPException(404, "动作段不存在")
     return action

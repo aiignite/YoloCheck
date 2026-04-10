@@ -1,5 +1,11 @@
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
 import i18n from '../i18n';
+
+afterEach(() => {
+  cleanup();
+});
 
 // Ensure tests use Chinese locale
 i18n.changeLanguage('zh');

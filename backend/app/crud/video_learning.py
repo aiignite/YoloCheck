@@ -140,6 +140,41 @@ async def update_action(db: AsyncSession, action_id: int, **kwargs) -> Optional[
     action = result.scalar_one_or_none()
     if not action:
         return None
+
+    requested_start_time = kwargs.pop("start_time", None)
+    requested_end_time = kwargs.pop("end_time", None)
+
+    if requested_start_time is not None or requested_end_time is not None:
+        session_result = await db.execute(
+            select(LearningSession).where(LearningSession.id == action.session_id)
+        )
+        session = session_result.scalar_one_or_none()
+        template = await get_template(db, action.template_id)
+        fps = (template.fps if template and template.fps else None) or 1.0
+
+        new_start_time = action.start_time if requested_start_time is None else requested_start_time
+        new_end_time = action.end_time if requested_end_time is None else requested_end_time
+        if new_start_time is None or new_end_time is None or new_end_time <= new_start_time:
+            raise ValueError("动作时间范围无效")
+
+        actions = list(await get_actions_by_session(db, action.session_id))
+        current_index = next((i for i, item in enumerate(actions) if item.id == action.id), -1)
+        previous_action = actions[current_index - 1] if current_index > 0 else None
+        next_action = actions[current_index + 1] if 0 <= current_index < len(actions) - 1 else None
+
+        if previous_action and previous_action.end_time is not None and new_start_time < previous_action.end_time:
+            raise ValueError("动作开始时间不能早于上一段结束时间")
+        if next_action and next_action.start_time is not None and new_end_time > next_action.start_time:
+            raise ValueError("动作结束时间不能晚于下一段开始时间")
+        if session and session.total_frames and new_end_time > session.total_frames / fps:
+            raise ValueError("动作结束时间超出视频时长")
+
+        action.start_time = round(new_start_time, 3)
+        action.end_time = round(new_end_time, 3)
+        action.duration = round(action.end_time - action.start_time, 3)
+        action.start_frame = int(round(action.start_time * fps))
+        action.end_frame = int(round(action.end_time * fps))
+
     for k, v in kwargs.items():
         if v is not None:
             setattr(action, k, v)
@@ -272,7 +307,7 @@ async def get_frame_overlays_by_session(
     start_time: Optional[float] = None,
     end_time: Optional[float] = None,
     stride: int = 1,
-    limit: int = 300,
+    limit: int = 100000,
 ) -> Sequence[KeyFrame]:
     query = select(KeyFrame).where(KeyFrame.session_id == session_id)
     if start_time is not None:
@@ -284,8 +319,6 @@ async def get_frame_overlays_by_session(
     frames = list(result.scalars().all())
     if stride > 1:
         frames = frames[::stride]
-    if limit > 0:
-        frames = frames[:limit]
     return frames
 
 

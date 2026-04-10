@@ -16,6 +16,7 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 from app.core.yolo_engine import YOLOEngine, get_engine, FrameDetections
+from app.core.video_training import load_action_model_artifact, predict_action_with_prototypes
 from app.config import get_settings
 
 settings = get_settings()
@@ -99,7 +100,10 @@ def compute_scene_change(prev_frame: np.ndarray, curr_frame: np.ndarray) -> floa
     cv2.normalize(curr_hist, curr_hist)
 
     # Bhattacharyya 距离 (0=完全相同, 1=完全不同)
-    score = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCOMP_BHATTACHARYYA)
+    compare_mode = getattr(cv2, "HISTCMP_BHATTACHARYYA", None)
+    if compare_mode is None:
+        compare_mode = getattr(cv2, "HISTCOMP_BHATTACHARYYA")
+    score = cv2.compareHist(prev_hist, curr_hist, compare_mode)
     return round(score * 100, 2)
 
 
@@ -279,24 +283,265 @@ def apply_custom_action_model(
 
     model_name = action_model.get("name") or "custom_action"
     model_id = action_model.get("id")
+    model_artifact = load_action_model_artifact(action_model.get("model_path"))
     for action in actions:
-        predicted_name = f"custom_action_step_{action.step_order}"
+        skeleton_summary = action.features.get("skeleton_summary") or {
+            "format": "coco17",
+            "frames": [{
+                "frame_number": action.start_frame,
+                "timestamp": action.start_time,
+                "keypoints": [],
+            }],
+        }
+        prediction = predict_action_with_prototypes(
+            model_artifact,
+            skeleton_summary,
+            duration=action.duration,
+        )
+        predicted_name = prediction.get("predicted_action_category") if prediction else f"custom_action_step_{action.step_order}"
         action.features.update({
             "predicted_action_category": predicted_name,
-            "action_model_score": round(action.confidence or 0.0, 3),
+            "action_model_score": prediction.get("action_model_score", round(action.confidence or 0.0, 3)) if prediction else round(action.confidence or 0.0, 3),
             "action_model_source": "custom_action",
             "action_model_id": model_id,
             "action_model_name": model_name,
-            "skeleton_summary": {
-                "format": "coco17",
-                "frames": [{
-                    "frame_number": action.start_frame,
-                    "timestamp": action.start_time,
-                    "keypoints": [],
-                }],
-            },
+            "skeleton_summary": skeleton_summary,
         })
+        if prediction and "prototype_distance" in prediction:
+            action.features["prototype_distance"] = prediction["prototype_distance"]
     return actions
+
+
+def compute_adaptive_scene_threshold(scores: list[float], configured_threshold: float) -> float:
+    """
+    根据整段视频的 scene_change_score 分布计算动态阈值。
+
+    采用分位数方案：
+    - 若有效分数不足5个，回退到配置阈值
+    - 否则取 75th 分位数 + 配置阈值 的加权平均
+    """
+    if not scores or len(scores) < 5:
+        return configured_threshold
+
+    sorted_scores = sorted(scores)
+    n = len(sorted_scores)
+    q75_idx = int(n * 0.75)
+    q75 = sorted_scores[min(q75_idx, n - 1)]
+    q75 = float(q75)
+
+    adaptive = (q75 * 0.4 + configured_threshold * 0.6)
+    return round(adaptive, 2)
+
+
+def compute_object_change_score(prev_objects: dict[str, int], curr_objects: dict[str, int]) -> float:
+    """
+    基于对象集合或对象频次计算变化强度，输出 0-1 范围标准化分值。
+
+    0 = 完全相同，1 = 完全不同（对象集合完全不同）。
+    """
+    prev_keys = set(prev_objects.keys())
+    curr_keys = set(curr_objects.keys())
+
+    if not prev_keys and not curr_keys:
+        return 0.0
+    if not prev_keys or not curr_keys:
+        return 1.0
+
+    all_keys = prev_keys | curr_keys
+    if not all_keys:
+        return 0.0
+
+    total_diff = 0.0
+    for key in all_keys:
+        prev_count = prev_objects.get(key, 0)
+        curr_count = curr_objects.get(key, 0)
+        total_diff += abs(prev_count - curr_count)
+
+    max_possible_diff = sum(
+        prev_objects.get(k, 0) + curr_objects.get(k, 0)
+        for k in all_keys
+    )
+
+    if max_possible_diff == 0:
+        return 0.0
+
+    return round(min(total_diff / max_possible_diff, 1.0), 3)
+
+
+def compute_interaction_change_score(
+    prev_interactions: list[dict],
+    curr_interactions: list[dict],
+) -> float:
+    """
+    基于手-物交互数量与类型变化评估动作切换概率，输出 0-1 范围标准化分值。
+    """
+    if not prev_interactions and not curr_interactions:
+        return 0.0
+    if not prev_interactions or not curr_interactions:
+        return 1.0
+
+    prev_set = {(i.get("object"), round(i.get("distance", 0), 1)) for i in prev_interactions}
+    curr_set = {(i.get("object"), round(i.get("distance", 0), 1)) for i in curr_interactions}
+
+    if prev_set == curr_set:
+        return 0.0
+
+    all_pairs = prev_set | curr_set
+    diff_count = len(all_pairs - (prev_set & curr_set))
+
+    return round(min(diff_count / max(len(all_pairs), 1), 1.0), 3)
+
+
+def compute_pose_motion_score(segment_frames: list[AnalyzedFrame]) -> dict:
+    """
+    统计 wrist span、关键点覆盖率、位移变化，用于辅助判断动作边界和动作稳定性。
+    """
+    wrist_x: list[float] = []
+    wrist_y: list[float] = []
+    frames_with_pose = 0
+    total_points: list[int] = []
+
+    for af in segment_frames:
+        if af.pose_keypoints:
+            frames_with_pose += 1
+        for person in af.pose_keypoints:
+            for point in person.get("points", []):
+                if point["index"] in (9, 10) and point.get("conf", 0) > 0.2:
+                    wrist_x.append(point["x"])
+                    wrist_y.append(point["y"])
+                total_points.append(1)
+
+    span_x = round((max(wrist_x) - min(wrist_x)), 2) if len(wrist_x) > 1 else 0.0
+    span_y = round((max(wrist_y) - min(wrist_y)), 2) if len(wrist_y) > 1 else 0.0
+    stability = 1.0 if span_x < 30 and span_y < 30 else (0.5 if span_x < 60 and span_y < 60 else 0.0)
+
+    return {
+        "frames_with_pose": frames_with_pose,
+        "wrist_span_x": span_x,
+        "wrist_span_y": span_y,
+        "stability_score": round(stability, 3),
+    }
+
+
+def compute_boundary_score(frame_context: dict) -> dict:
+    """
+    将 scene_change、object_change、interaction_change、pose_motion 合成边界分。
+    同时输出 boundary_reasons。
+    """
+    scene_score = frame_context.get("scene_change_score", 0.0)
+    prev_objects = frame_context.get("prev_objects", {})
+    curr_objects = frame_context.get("curr_objects", {})
+    prev_interactions = frame_context.get("prev_interactions", [])
+    curr_interactions = frame_context.get("curr_interactions", [])
+    prev_pose = frame_context.get("prev_pose", {})
+    curr_pose = frame_context.get("curr_pose", {})
+
+    object_change = compute_object_change_score(prev_objects, curr_objects)
+    interaction_change = compute_interaction_change_score(prev_interactions, curr_interactions)
+
+    scene_component = min(scene_score / 100, 1.0)
+    combined = (
+        scene_component * 0.35 +
+        object_change * 0.30 +
+        interaction_change * 0.25 +
+        0.10
+    )
+    boundary_score = round(min(combined, 1.0), 3)
+
+    reasons: list[str] = []
+    if scene_score >= 40:
+        reasons.append("scene_jump")
+    if object_change >= 0.5:
+        reasons.append("object_set_changed")
+    if interaction_change >= 0.5:
+        reasons.append("interaction_changed")
+
+    if prev_pose and curr_pose:
+        prev_span = abs(prev_pose.get("wrist_span_x", 0) - curr_pose.get("wrist_span_x", 0))
+        if prev_span >= 25:
+            reasons.append("pose_motion_spike")
+
+    return {
+        "score": boundary_score,
+        "reasons": reasons,
+        "object_change_score": object_change,
+        "interaction_change_score": interaction_change,
+    }
+
+
+def merge_similar_actions(actions: list[DetectedAction], min_duration_threshold: float = 0.5) -> list[DetectedAction]:
+    """
+    对相邻动作段进行二次合并。
+
+    合并条件：
+    - 短动作（时长 < min_duration_threshold）与其相邻动作合并
+    - 相邻动作间的对象集合相似度高（> 0.6）、姿态摘要相似度高
+    """
+    if len(actions) <= 1:
+        return actions
+
+    merged: list[DetectedAction] = []
+
+    def _can_merge(prev_action: DetectedAction, action: DetectedAction) -> bool:
+        prev_objects = dict.fromkeys(prev_action.objects_in_scene or [], 1)
+        curr_objects = dict.fromkeys(action.objects_in_scene or [], 1)
+        object_change_score = compute_object_change_score(prev_objects, curr_objects)
+        obj_similarity = 1.0 - object_change_score
+
+        prev_pose = prev_action.features.get("pose_summary", {}) if prev_action.features else {}
+        curr_pose = action.features.get("pose_summary", {}) if action.features else {}
+
+        pose_similar = bool(prev_pose or curr_pose) and (
+            abs(prev_pose.get("wrist_span_x", 0) - curr_pose.get("wrist_span_x", 0)) < 20 and
+            abs(prev_pose.get("wrist_span_y", 0) - curr_pose.get("wrist_span_y", 0)) < 20
+        )
+
+        same_primary_object = (prev_action.features or {}).get("primary_object") == (action.features or {}).get("primary_object")
+        objects_overlap = bool(set(prev_action.objects_in_scene or []).intersection(action.objects_in_scene or []))
+        return obj_similarity > 0.6 and object_change_score < 1.0 and objects_overlap and pose_similar and same_primary_object
+
+    for action in actions:
+        if not merged:
+            merged.append(action)
+            continue
+
+        prev_action = merged[-1]
+
+        should_merge = False
+
+        if (action.duration or 0) < min_duration_threshold:
+            should_merge = _can_merge(prev_action, action)
+        else:
+            should_merge = _can_merge(prev_action, action)
+
+        if should_merge:
+            merged[-1] = _merge_two_actions(prev_action, action)
+            merged[-1].features["merged_similar"] = True
+        else:
+            merged.append(action)
+
+    for idx, act in enumerate(merged, start=1):
+        act.step_order = idx
+
+    return merged
+
+
+def _merge_two_actions(target: DetectedAction, source: DetectedAction) -> DetectedAction:
+    target.start_frame = min(target.start_frame, source.start_frame)
+    target.end_frame = max(target.end_frame, source.end_frame)
+    target.start_time = round(min(target.start_time, source.start_time), 3)
+    target.end_time = round(max(target.end_time, source.end_time), 3)
+    target.duration = round((target.end_time or 0) - (target.start_time or 0), 3)
+    target.objects_in_scene = sorted(set((target.objects_in_scene or []) + (source.objects_in_scene or [])))
+    target.features = {
+        **(target.features or {}),
+        "merged_similar": True,
+    }
+    if not target.keyframe_path:
+        target.keyframe_path = source.keyframe_path
+    if target.confidence is not None and source.confidence is not None:
+        target.confidence = round((target.confidence + source.confidence) / 2, 3)
+    return target
 
 
 def _build_workflow_summary(actions: list[DetectedAction]) -> tuple[dict, list[dict]]:
@@ -387,7 +632,13 @@ def analyze_video_frames(
     if not cap.isOpened():
         raise ValueError(f"无法打开视频: {video_path}")
 
-    engine = get_engine()
+    if object_model:
+        engine = get_engine(model_path=object_model.get("model_path", settings.yolo_model_path))
+    else:
+        engine = get_engine(model_path=settings.yolo_model_path)
+        if not engine.is_loaded:
+            # 默认检测模型损坏时，退回到可工作的 pose 模型，至少保证人体/姿态链路可运行
+            engine = get_engine(model_path="yolov8n-pose.pt")
     original_threshold = engine.confidence_threshold
     engine.confidence_threshold = min_confidence
 
@@ -465,6 +716,8 @@ def analyze_video_frames(
 def extract_actions(
     analyzed_frames: list[AnalyzedFrame],
     fps: float,
+    min_action_duration_seconds: float = 0.0,
+    object_change_sensitivity: str = "medium",
 ) -> list[DetectedAction]:
     """
     从分析帧中提取动作序列
@@ -474,12 +727,38 @@ def extract_actions(
     if not analyzed_frames:
         return []
 
+    sensitivity_threshold = {
+        "low": 2,
+        "medium": 1,
+        "high": 0,
+    }.get(object_change_sensitivity, 1)
+
     # 找到所有边界帧的索引
     boundary_indices = [0]  # 视频开始即为第一个边界
+    previous_objects = {
+        det["class_name"]
+        for det in analyzed_frames[0].detections
+    }
     for i, af in enumerate(analyzed_frames):
         if af.is_boundary and i > 0:
             boundary_indices.append(i)
+            previous_objects = {
+                det["class_name"]
+                for det in af.detections
+            }
+            continue
+        if i > 0:
+            current_objects = {
+                det["class_name"]
+                for det in af.detections
+            }
+            symmetric_diff = len(current_objects.symmetric_difference(previous_objects))
+            if current_objects and previous_objects and symmetric_diff > sensitivity_threshold:
+                boundary_indices.append(i)
+            if current_objects:
+                previous_objects = current_objects
     boundary_indices.append(len(analyzed_frames))  # 视频结束
+    boundary_indices = sorted(set(boundary_indices))
 
     actions: list[DetectedAction] = []
     for seq_idx in range(len(boundary_indices) - 1):
@@ -552,6 +831,20 @@ def extract_actions(
             avg_scene_change=avg_scene_change,
         )
 
+        pose_motion_result = compute_pose_motion_score(segment)
+        detection_score = round(avg_conf, 3) if avg_conf else 0.0
+        pose_score = round(
+            pose_motion_result["frames_with_pose"] / max(len(segment), 1) if len(segment) > 0 else 0.0, 3
+        )
+        interaction_score = round(
+            interaction_summary.get("frames_with_interaction", 0) / max(len(segment), 1) if len(segment) > 0 else 0.0, 3
+        )
+        stability_score = pose_motion_result.get("stability_score", 0.0)
+        boundary_score_for_segment = round(avg_scene_change / 100, 3) if avg_scene_change else 0.0
+        boundary_reasons_for_segment: list[str] = []
+        if avg_scene_change >= 40:
+            boundary_reasons_for_segment.append("scene_jump")
+
         actions.append(DetectedAction(
             step_order=seq_idx + 1,
             action_name=action_name,
@@ -579,10 +872,67 @@ def extract_actions(
                 "quality_score": quality_score,
                 "suggested_action_name": suggested_action_name,
                 "suggestions": suggestions,
+                "skeleton_summary": {
+                    "format": "coco17",
+                    "frames": [
+                        {
+                            "frame_number": af.frame_number,
+                            "timestamp": af.timestamp,
+                            "keypoints": [
+                                point
+                                for person in af.pose_keypoints
+                                for point in person.get("points", [])
+                            ],
+                        }
+                        for af in segment
+                    ],
+                },
+                "boundary_score": boundary_score_for_segment,
+                "boundary_reasons": boundary_reasons_for_segment,
+                "detection_score": detection_score,
+                "pose_score": pose_score,
+                "interaction_score": interaction_score,
+                "stability_score": stability_score,
+                "primary_objects": [primary_object] if primary_object else [],
             },
         ))
 
-    return actions
+    if min_action_duration_seconds <= 0 or len(actions) <= 1:
+        return merge_similar_actions(actions, min_duration_threshold=0.5)
+
+    merged_actions: list[DetectedAction] = []
+
+    def merge_action_pair(target: DetectedAction, source: DetectedAction) -> DetectedAction:
+        target.start_frame = min(target.start_frame, source.start_frame)
+        target.end_frame = max(target.end_frame, source.end_frame)
+        target.start_time = round(min(target.start_time, source.start_time), 3)
+        target.end_time = round(max(target.end_time, source.end_time), 3)
+        target.duration = round((target.end_time or 0) - (target.start_time or 0), 3)
+        target.objects_in_scene = sorted(set((target.objects_in_scene or []) + (source.objects_in_scene or [])))
+        target.features = {
+            **(target.features or {}),
+            "merged_short_segment": True,
+        }
+        if not target.keyframe_path:
+            target.keyframe_path = source.keyframe_path
+        return target
+
+    for action in actions:
+        if (action.duration or 0) < min_action_duration_seconds:
+            if merged_actions:
+                merge_action_pair(merged_actions[-1], action)
+                continue
+            merged_actions.append(action)
+            continue
+
+        if merged_actions and (merged_actions[-1].duration or 0) < min_action_duration_seconds:
+            merge_action_pair(action, merged_actions.pop())
+        merged_actions.append(action)
+
+    for idx, action in enumerate(merged_actions, start=1):
+        action.step_order = idx
+
+    return merge_similar_actions(merged_actions, min_duration_threshold=0.5)
 
 
 def generate_analysis_summary(

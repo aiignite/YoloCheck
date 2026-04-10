@@ -145,6 +145,8 @@ class LearningSession(Base):
     sample_rate = Column(Integer, default=5)
     min_confidence = Column(Float, default=0.4)
     scene_threshold = Column(Float, default=30.0)
+    min_action_duration_seconds = Column(Float, default=1.0)
+    object_change_sensitivity = Column(String(20), default="medium")
     object_model_id = Column(Integer, ForeignKey("models.id"))
     action_model_id = Column(Integer, ForeignKey("models.id"))
     error_message = Column(Text)

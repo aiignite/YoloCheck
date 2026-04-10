@@ -43,6 +43,9 @@ async def lifespan(app: FastAPI):
     app.state.pipeline = pipeline
     app.state.task_queue = get_task_queue()
 
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     yield
 
     if mqtt_client:

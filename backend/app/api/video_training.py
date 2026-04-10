@@ -4,16 +4,23 @@ import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.video_training import (
-    build_action_sample_summary,
-    create_action_training_artifact,
-    create_object_training_artifact,
-    export_object_dataset,
+    build_training_job_detail,
+    ensure_safe_upload_file,
+    log_exception,
+    resolve_training_artifact_path,
+    sanitize_metrics_paths,
+    serialize_training_job,
+    to_upload_relative_path,
+    run_action_training_pipeline,
+    run_object_training_pipeline,
 )
 from app.crud import model as model_crud
 from app.crud import video_training as crud
+from app.config import get_settings
 from app.database import get_db
 from app.models.models import User
 from app.core.auth import require_auth, require_role
@@ -23,6 +30,7 @@ from app.schemas.video_learning import (
     ActionCategoryResponse,
     ActionSampleFromSessionRequest,
     ActionSampleImportRequest,
+    ObjectAnnotationFromSessionRequest,
     ActionSampleSetCreate,
     ActionSampleSetResponse,
     BatchCreateResponse,
@@ -33,10 +41,13 @@ from app.schemas.video_learning import (
     ObjectCategoryResponse,
     ObjectTrainingJobCreate,
     ActionTrainingJobCreate,
+    TrainingJobDetailResponse,
+    TrainingEvaluationItemResponse,
     TrainingJobResponse,
 )
 
 router = APIRouter()
+settings = get_settings()
 
 
 def _utc_now() -> datetime:
@@ -45,11 +56,9 @@ def _utc_now() -> datetime:
 
 async def _complete_job_with_model(db: AsyncSession, job, model_type: str):
     if model_type == "custom_object":
-        dataset_export = await export_object_dataset(db, job.dataset_id, job.id)
-        artifact_path, metrics = create_object_training_artifact(job.id, job.name, dataset_export=dataset_export)
+        execution = await run_object_training_pipeline(db, job)
     else:
-        artifact_path, metrics = create_action_training_artifact(job.id, job.name)
-        metrics.update(await build_action_sample_summary(db, job.dataset_id))
+        execution = await run_action_training_pipeline(db, job)
 
     model = await model_crud.create_model(
         db,
@@ -57,14 +66,14 @@ async def _complete_job_with_model(db: AsyncSession, job, model_type: str):
         version=f"job-{job.id}",
         model_type=model_type,
         description=f"Generated from training job {job.id}",
-        model_path=artifact_path,
-        file_size=os.path.getsize(artifact_path),
-        accuracy=metrics.get("accuracy"),
-        precision=metrics.get("precision"),
-        recall=metrics.get("recall"),
-        map50=metrics.get("map50"),
-        map50_95=metrics.get("map50_95"),
-        inference_speed=metrics.get("inference_speed"),
+        model_path=execution.artifact_path,
+        file_size=os.path.getsize(execution.artifact_path),
+        accuracy=execution.metrics.get("accuracy"),
+        precision=execution.metrics.get("precision"),
+        recall=execution.metrics.get("recall"),
+        map50=execution.metrics.get("map50"),
+        map50_95=execution.metrics.get("map50_95"),
+        inference_speed=execution.metrics.get("inference_speed"),
         status="ready",
     )
     return await crud.update_training_job(
@@ -73,7 +82,8 @@ async def _complete_job_with_model(db: AsyncSession, job, model_type: str):
         model_id=model.id,
         status="completed",
         progress=100.0,
-        metrics_json=metrics,
+        metrics_json=execution.metrics,
+        log_path=execution.log_path,
         completed_at=_utc_now(),
     )
 
@@ -83,6 +93,8 @@ async def _run_training_job(job_id: int, model_type: str, session_factory: async
         job = await crud.get_training_job(db, job_id)
         if not job:
             return
+
+        log_path = os.path.join(settings.upload_dir, "training_logs", f"{'object' if model_type == 'custom_object' else 'action'}_job_{job_id}.log")
 
         try:
             job = await crud.update_training_job(
@@ -97,10 +109,12 @@ async def _run_training_job(job_id: int, model_type: str, session_factory: async
                 return
             await _complete_job_with_model(db, job, model_type)
         except Exception as exc:
+            log_exception(log_path, exc)
             await crud.update_training_job(
                 db,
                 job_id,
                 status="failed",
+                log_path=log_path,
                 error_message=str(exc),
                 completed_at=_utc_now(),
             )
@@ -149,6 +163,44 @@ async def create_object_annotation(
     await crud.create_object_annotation(db, annotation_set_id=set_id, **payload.model_dump())
     updated = await crud.get_object_annotation_set(db, set_id)
     return updated
+
+
+@router.post("/object-annotation-sets/{set_id}/annotations/from-session", response_model=BatchCreateResponse, status_code=201)
+async def import_object_annotations_from_session(
+    set_id: int,
+    payload: ObjectAnnotationFromSessionRequest,
+    user: User = Depends(require_role("manager")),
+    db: AsyncSession = Depends(get_db),
+):
+    annotation_set = await crud.get_object_annotation_set(db, set_id)
+    if not annotation_set:
+        raise HTTPException(404, "标注集不存在")
+
+    keyframes = await crud.get_session_keyframes_with_detections(db, payload.session_id)
+    if not keyframes:
+        raise HTTPException(404, "该学习会话没有检测到物体的帧数据")
+
+    annotation_items = []
+    for kf in keyframes:
+        detections = kf.detections or []
+        filtered = [d for d in detections if d.get("confidence", 0) >= payload.min_confidence]
+        if not filtered:
+            continue
+        annotation_items.append({
+            "annotation_set_id": set_id,
+            "image_path": kf.image_path or "",
+            "frame_number": kf.frame_number,
+            "source_video_template_id": kf.template_id,
+            "width": None,
+            "height": None,
+            "annotations_json": filtered,
+        })
+
+    if not annotation_items:
+        raise HTTPException(400, "没有满足置信度要求的检测结果")
+
+    count = await crud.batch_create_object_annotations(db, annotation_items)
+    return BatchCreateResponse(created_count=count)
 
 
 @router.get("/action-categories", response_model=list[ActionCategoryResponse])
@@ -255,6 +307,172 @@ async def import_action_samples_from_session(
 @router.get("/training-jobs", response_model=list[TrainingJobResponse])
 async def list_training_jobs(user: User = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     return await crud.list_training_jobs(db)
+
+
+@router.get("/training-jobs/{job_id}", response_model=TrainingJobDetailResponse)
+async def get_training_job_detail(
+    job_id: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await crud.get_training_job_with_model(db, job_id)
+    if not job:
+        raise HTTPException(404, "训练任务不存在")
+
+    model = await model_crud.get_model(db, job.model_id) if job.model_id else None
+    return build_training_job_detail(job, model=model)
+
+
+@router.get("/training-jobs/{job_id}/log")
+async def get_training_job_log(
+    job_id: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await crud.get_training_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "训练任务不存在")
+    if not job.log_path:
+        raise HTTPException(404, "训练日志不存在")
+
+    try:
+        log_path = ensure_safe_upload_file(job.log_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if not log_path or not log_path.exists() or not log_path.is_file():
+        raise HTTPException(404, "训练日志不存在")
+    return PlainTextResponse(log_path.read_text(encoding="utf-8"))
+
+
+@router.get("/training-jobs/{job_id}/artifact")
+async def download_training_job_artifact(
+    job_id: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await crud.get_training_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "训练任务不存在")
+
+    model = await model_crud.get_model(db, job.model_id) if job.model_id else None
+    try:
+        artifact_path = resolve_training_artifact_path(job, model=model)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if not artifact_path or not artifact_path.exists() or not artifact_path.is_file():
+        raise HTTPException(404, "训练产物不存在")
+
+    return FileResponse(path=artifact_path, filename=artifact_path.name, media_type="application/octet-stream")
+
+
+@router.get("/models/{model_type}/evaluations", response_model=list[TrainingEvaluationItemResponse])
+async def list_training_model_evaluations(
+    model_type: str,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    if model_type not in {"custom_object", "custom_action"}:
+        raise HTTPException(400, "仅支持自定义训练模型评估")
+
+    models = await model_crud.list_models(db, model_type=model_type, limit=100)
+    items = []
+    for model in models:
+        job = await crud.get_training_job_by_model_id(db, model.id)
+        items.append({
+            "model": {
+                "id": model.id,
+                "name": model.name,
+                "version": model.version,
+                "model_type": model.model_type,
+                "accuracy": model.accuracy,
+                "precision": model.precision,
+                "recall": model.recall,
+                "map50": model.map50,
+                "map50_95": model.map50_95,
+                "inference_speed": model.inference_speed,
+                "is_active": model.is_active,
+                "status": model.status,
+            },
+            "job": None if job is None else serialize_training_job(job),
+        })
+    return items
+
+
+@router.get("/models/compare/{id_a}/{id_b}")
+async def compare_training_models(
+    id_a: int,
+    id_b: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    model_a = await model_crud.get_model(db, id_a)
+    model_b = await model_crud.get_model(db, id_b)
+    if not model_a or not model_b:
+        raise HTTPException(404, "模型不存在")
+
+    job_a = await crud.get_training_job_by_model_id(db, id_a)
+    job_b = await crud.get_training_job_by_model_id(db, id_b)
+
+    metrics_a = job_a.metrics_json if job_a else {}
+    metrics_b = job_b.metrics_json if job_b else {}
+    metrics_a = sanitize_metrics_paths(metrics_a)
+    metrics_b = sanitize_metrics_paths(metrics_b)
+    dataset_a = metrics_a.get("dataset_export", {})
+    dataset_b = metrics_b.get("dataset_export", {})
+    class_metrics_a = metrics_a.get("class_metrics", {})
+    class_metrics_b = metrics_b.get("class_metrics", {})
+
+    class_metrics_diff = {}
+    for class_name in sorted(set(class_metrics_a.keys()) | set(class_metrics_b.keys())):
+        class_metrics_diff[class_name] = {
+            "precision_diff": round(float((class_metrics_a.get(class_name) or {}).get("precision", 0.0)) - float((class_metrics_b.get(class_name) or {}).get("precision", 0.0)), 4),
+            "recall_diff": round(float((class_metrics_a.get(class_name) or {}).get("recall", 0.0)) - float((class_metrics_b.get(class_name) or {}).get("recall", 0.0)), 4),
+            "sample_count_diff": int((class_metrics_a.get(class_name) or {}).get("sample_count", 0)) - int((class_metrics_b.get(class_name) or {}).get("sample_count", 0)),
+        }
+
+    return {
+        "model_a": {
+            "id": model_a.id,
+            "name": model_a.name,
+            "model_type": model_a.model_type,
+            "accuracy": model_a.accuracy,
+            "precision": model_a.precision,
+            "recall": model_a.recall,
+            "map50": model_a.map50,
+            "map50_95": model_a.map50_95,
+            "inference_speed": model_a.inference_speed,
+        },
+        "model_b": {
+            "id": model_b.id,
+            "name": model_b.name,
+            "model_type": model_b.model_type,
+            "accuracy": model_b.accuracy,
+            "precision": model_b.precision,
+            "recall": model_b.recall,
+            "map50": model_b.map50,
+            "map50_95": model_b.map50_95,
+            "inference_speed": model_b.inference_speed,
+        },
+        "job_a": {
+            "id": job_a.id,
+            "name": job_a.name,
+            "log_path": to_upload_relative_path(job_a.log_path),
+            "metrics_json": metrics_a,
+        } if job_a else None,
+        "job_b": {
+            "id": job_b.id,
+            "name": job_b.name,
+            "log_path": to_upload_relative_path(job_b.log_path),
+            "metrics_json": metrics_b,
+        } if job_b else None,
+        "dataset_diff": {
+            "annotation_count_diff": int(dataset_a.get("annotation_count", 0)) - int(dataset_b.get("annotation_count", 0)),
+            "class_count_diff": len(dataset_a.get("class_names", [])) - len(dataset_b.get("class_names", [])),
+        },
+        "class_metrics_diff": class_metrics_diff,
+    }
 
 
 @router.post("/training-jobs/object-detection", response_model=TrainingJobResponse, status_code=201)
