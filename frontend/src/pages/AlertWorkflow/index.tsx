@@ -8,8 +8,8 @@ import {
   EditOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import * as echarts from 'echarts';
 import api from '../../utils/api';
+import { echarts } from '../../utils/echarts';
 
 interface AlertRule {
   id: number;

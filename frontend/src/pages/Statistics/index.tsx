@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Card, Row, Col, Select, Space, Button, Statistic, message } from 'antd';
 import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
 import { useTranslation } from 'react-i18next';
 import api from '../../utils/api';
+import { echarts } from '../../utils/echarts';
 
 const Statistics: React.FC = () => {
   const [efficiency, setEfficiency] = useState<any[]>([]);
   const [days, setDays] = useState(7);
   const [comparison, setComparison] = useState<any>(null);
-  const chartRef1 = useRef<ReactECharts>(null);
-  const chartRef2 = useRef<ReactECharts>(null);
-  const chartRef3 = useRef<ReactECharts>(null);
+  const chartRef1 = useRef<ReactEChartsCore>(null);
+  const chartRef2 = useRef<ReactEChartsCore>(null);
+  const chartRef3 = useRef<ReactEChartsCore>(null);
   const { t } = useTranslation();
 
   const fetchData = async () => {
@@ -49,7 +50,7 @@ const Statistics: React.FC = () => {
     message.success(t('pages.statistics.downloadingCsv'));
   };
 
-  const handleExportChart = (ref: React.RefObject<ReactECharts | null>, name: string) => {
+  const handleExportChart = (ref: React.RefObject<ReactEChartsCore | null>, name: string) => {
     const instance = ref.current?.getEchartsInstance();
     if (instance) {
       const url = instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
@@ -183,13 +184,13 @@ const Statistics: React.FC = () => {
 
       <Row gutter={[16, 16]}>
         <Col span={24}>
-          <Card><ReactECharts ref={chartRef1} option={productionOption} style={{ height: 300 }} /></Card>
+          <Card><ReactEChartsCore echarts={echarts} ref={chartRef1} option={productionOption} style={{ height: 300 }} /></Card>
         </Col>
         <Col span={12}>
-          <Card><ReactECharts ref={chartRef2} option={yieldOption} style={{ height: 300 }} /></Card>
+          <Card><ReactEChartsCore echarts={echarts} ref={chartRef2} option={yieldOption} style={{ height: 300 }} /></Card>
         </Col>
         <Col span={12}>
-          <Card><ReactECharts ref={chartRef3} option={cycleTimeOption} style={{ height: 300 }} /></Card>
+          <Card><ReactEChartsCore echarts={echarts} ref={chartRef3} option={cycleTimeOption} style={{ height: 300 }} /></Card>
         </Col>
       </Row>
     </div>
