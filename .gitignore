@@ -1,4 +1,49 @@
 .worktrees/
 __pycache__/
 *.pyc
-test.db
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.db
+*.db-journal
+*.log
+logs/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/uploads/
+backend/yolov8n.pt
+backend/yolov8n.pt.broken
+backend/models/
+backend/alembic/versions/
+backend.log
+
+# Frontend
+frontend.log
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+
+# Ralph
+.ralph/
+.ralphrc
+
+# MCP / playwright
+.playwright-mcp/
+
+# Docs/plans (optional artifacts)
+docs/analysis/
+docs/plans/
+
+# Tasks archive
+.tasks/archive/
