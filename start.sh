@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-BACKEND_PORT=8000
-FRONTEND_PORT=5173
+BACKEND_PORT=3275
+FRONTEND_PORT=3270
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
