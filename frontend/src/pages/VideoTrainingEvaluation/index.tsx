@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Descriptions, Empty, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import EChartsReact from 'echarts-for-react';
 
 import api from '../../utils/api';
 import { echarts } from '../../utils/echarts';
@@ -236,7 +236,7 @@ export default function VideoTrainingEvaluation() {
             <Card title="训练数据概览" style={{ height: '100%' }}>
               {items.length ? (
                 canRenderCharts ? (
-                  <ReactEChartsCore echarts={echarts} option={datasetChartOption} style={{ height: 300 }} />
+                  <EChartsReact echarts={echarts} option={datasetChartOption} style={{ height: 300 }} />
                 ) : (
                   <Typography.Text>图表预览不可用</Typography.Text>
                 )
@@ -262,7 +262,7 @@ export default function VideoTrainingEvaluation() {
               </Descriptions>
 
               {canRenderCharts ? (
-                <ReactEChartsCore echarts={echarts} option={compareChartOption} style={{ height: 320 }} />
+                <EChartsReact echarts={echarts} option={compareChartOption} style={{ height: 320 }} />
               ) : (
                 <Typography.Text>图表预览不可用</Typography.Text>
               )}
