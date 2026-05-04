@@ -1,11 +1,10 @@
-"""用户管理API"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, ChangePasswordRequest
 from app.crud import user as crud
-from app.core.auth import require_auth, require_role
+from app.core.auth import require_auth, require_role, validate_password_strength, check_password_history, save_password_history
 from app.models.models import User
 
 router = APIRouter()
@@ -16,6 +15,9 @@ async def create_user(data: UserCreate, _user: User = Depends(require_role("mana
     existing = await crud.get_user_by_username(db, data.username)
     if existing:
         raise HTTPException(409, "用户名已存在")
+    err = validate_password_strength(data.password)
+    if err:
+        raise HTTPException(400, err)
     return await crud.create_user(
         db,
         username=data.username,
@@ -49,9 +51,20 @@ async def update_user(user_id: int, data: UserUpdate, _user: User = Depends(requ
 
 @router.put("/{user_id}/password")
 async def change_password(user_id: int, data: ChangePasswordRequest, user: User = Depends(require_auth), db: AsyncSession = Depends(get_db)):
+    if user_id != user.id and user.role not in ("admin", "manager"):
+        raise HTTPException(403, "无权修改其他用户密码")
+    err = validate_password_strength(data.new_password)
+    if err:
+        raise HTTPException(400, err)
+    history_err = await check_password_history(db, user_id, data.new_password)
+    if history_err:
+        raise HTTPException(400, history_err)
     success = await crud.change_password(db, user_id, data.old_password, data.new_password)
     if not success:
         raise HTTPException(400, "原密码错误或用户不存在")
+    target = await crud.get_user(db, user_id)
+    if target:
+        await save_password_history(db, user_id, target.hashed_password)
     return {"message": "密码修改成功"}
 
 

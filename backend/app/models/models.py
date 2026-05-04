@@ -314,7 +314,41 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), default="operator")  # admin / manager / operator
     is_active = Column(Boolean, default=True)
+    is_locked_until = Column(DateTime)
+    failed_login_count = Column(Integer, default=0)
     last_login = Column(DateTime)
+    created_at = Column(DateTime, default=func.now())
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=False, index=True)
+    ip_address = Column(String(45))
+    user_agent = Column(String(300))
+    attempted_at = Column(DateTime, default=func.now(), index=True)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    jti = Column(String(64), unique=True, nullable=False, index=True)
+    ip_address = Column(String(45))
+    user_agent = Column(String(300))
+    device_info = Column(String(200))
+    created_at = Column(DateTime, default=func.now())
+    last_accessed_at = Column(DateTime, default=func.now())
+
+
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=func.now())
 
 

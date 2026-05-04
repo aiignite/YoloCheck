@@ -13,7 +13,7 @@ interface AuthContextType {
   user: AuthUser | null;
   token: string | null;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, rememberMe?: boolean, extra?: Record<string, unknown>) => Promise<void>;
   logout: () => void;
   loading: boolean;
 }
@@ -72,8 +72,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     init();
   }, []);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await api.post('/auth/login', { username, password });
+  const login = useCallback(async (username: string, password: string, rememberMe = false, extra?: Record<string, unknown>) => {
+    const res = await api.post('/auth/login', { username, password, remember_me: rememberMe, ...extra });
     const { access_token, refresh_token, user: userData } = res.data;
     localStorage.setItem('access_token', access_token);
     localStorage.setItem('refresh_token', refresh_token);

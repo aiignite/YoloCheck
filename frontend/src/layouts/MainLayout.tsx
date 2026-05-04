@@ -48,6 +48,8 @@ const MainLayout: React.FC = () => {
     { key: '/alert-workflow', icon: <BellOutlined />, label: t('menu.alertWorkflow') },
     { key: '/storage', icon: <DatabaseOutlined />, label: t('menu.storage') },
     { key: '/users', icon: <TeamOutlined />, label: t('menu.users') },
+    { key: '/sessions', icon: <MonitorOutlined />, label: t('menu.sessions') || '会话管理' },
+    { key: '/login-history', icon: <AuditOutlined />, label: t('menu.loginHistory') || '登录历史' },
     ...(user?.role === 'admin' ? [{ key: '/audit-logs', icon: <AuditOutlined />, label: t('menu.auditLogs') }] : []),
     { key: '/settings', icon: <SettingOutlined />, label: t('menu.settings') },
   ];

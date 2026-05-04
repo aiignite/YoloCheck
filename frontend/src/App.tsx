@@ -21,6 +21,8 @@ const VideoTrainingEvaluation = lazy(() => import('./pages/VideoTrainingEvaluati
 const BatchAnalysis = lazy(() => import('./pages/BatchAnalysis'));
 const AlertWorkflow = lazy(() => import('./pages/AlertWorkflow'));
 const StorageManage = lazy(() => import('./pages/StorageManage'));
+const Sessions = lazy(() => import('./pages/Sessions'));
+const LoginHistory = lazy(() => import('./pages/LoginHistory'));
 
 function PageFallback() {
   return (
@@ -61,6 +63,8 @@ function App() {
               <Route path="storage" element={<StorageManage />} />
               <Route path="audit-logs" element={<AuditLogs />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="sessions" element={<Sessions />} />
+              <Route path="login-history" element={<LoginHistory />} />
             </Route>
           </Routes>
         </Suspense>

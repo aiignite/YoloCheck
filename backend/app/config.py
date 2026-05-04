@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     jwt_access_expire_minutes: int = 480
     jwt_refresh_expire_days: int = 7
 
+    # 安全策略
+    password_min_length: int = 8
+    password_history_count: int = 5
+    login_max_attempts: int = 5
+    login_lockout_minutes: int = 15
+
     # CORS
     cors_origins: str = "http://localhost:3270,http://localhost:5173,http://localhost:3260,http://localhost:8000"
 

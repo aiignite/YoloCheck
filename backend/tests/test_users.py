@@ -11,7 +11,7 @@ from app.crud.user import create_user as crud_create_user
 async def test_create_user(client: AsyncClient, db_session: AsyncSession, admin_token: str):
     resp = await client.post(
         "/api/users/",
-        json={"username": "newuser", "password": "pass123456", "display_name": "新用户", "role": "operator"},
+        json={"username": "newuser", "password": "Test1234!", "display_name": "新用户", "role": "operator"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 201
