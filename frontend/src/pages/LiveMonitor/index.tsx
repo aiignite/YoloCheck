@@ -62,6 +62,7 @@ interface CameraFeed {
   active: boolean;
   mode: 'pose' | 'detect';
   confidence: number;
+  iou: number;
   fps: number;
   isLocal: boolean;
   streamRef?: MediaStream | null;
@@ -160,6 +161,7 @@ const LiveMonitor: React.FC = () => {
       active: true,
       mode: 'detect',
       confidence: 0.5,
+      iou: 0.7,
       fps: 8,
       isLocal,
       streamRef: stream,
@@ -176,7 +178,7 @@ const LiveMonitor: React.FC = () => {
     const wsUrl = `${WS_BASE}/api/live/ws/${encodeURIComponent(feed.source)}${token ? `?token=${token}` : ''}`;
     const ws = new WebSocket(wsUrl);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'config', mode: feed.mode, confidence: feed.confidence, fps: 3 }));
+      ws.send(JSON.stringify({ type: 'config', mode: feed.mode, confidence: feed.confidence, iou: feed.iou, fps: 3 }));
     };
     ws.onmessage = (evt) => {
       try {
@@ -243,7 +245,7 @@ const LiveMonitor: React.FC = () => {
     }
     try {
       const res = await api.get(`/live/snapshot/${feed.source}`, {
-        params: { mode: feed.mode, conf: feed.confidence },
+        params: { mode: feed.mode, conf: feed.confidence, iou: feed.iou },
       });
       if (res.data.snapshot_url) {
         notification.success({
@@ -264,7 +266,7 @@ const LiveMonitor: React.FC = () => {
       if (!f.isLocal) {
         const ws = wsRefs.current[feedId];
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'config', mode: updated.mode, confidence: updated.confidence, fps: 3 }));
+          ws.send(JSON.stringify({ type: 'config', mode: updated.mode, confidence: updated.confidence, iou: updated.iou, fps: 3 }));
         }
       }
       return updated;
@@ -335,7 +337,7 @@ const LiveMonitor: React.FC = () => {
             />
           ) : (
             <img
-              src={`${API_BASE}/live/stream/${feed.source}?mode=${feed.mode}&conf=${feed.confidence}&fps=${feed.fps}`}
+              src={`${API_BASE}/live/stream/${feed.source}?mode=${feed.mode}&conf=${feed.confidence}&iou=${feed.iou}&fps=${feed.fps}`}
               alt={feed.name}
               style={{
                 width: '100%',
@@ -369,7 +371,13 @@ const LiveMonitor: React.FC = () => {
             <Slider
               min={10} max={95} value={feed.confidence * 100}
               onChange={v => updateFeed(feed.id, { confidence: v / 100 })}
-              style={{ flex: 1, margin: '0 8px', minWidth: 100 }}
+              style={{ flex: 1, margin: '0 8px', minWidth: 80 }}
+            />
+            <span style={{ fontSize: 12 }}>IoU: {(feed.iou * 100).toFixed(0)}%</span>
+            <Slider
+              min={10} max={90} value={feed.iou * 100}
+              onChange={v => updateFeed(feed.id, { iou: v / 100 })}
+              style={{ flex: 1, margin: '0 8px', minWidth: 80 }}
             />
             <span style={{ fontSize: 12 }}>{t('pages.liveMonitor.fps')}: </span>
             <Select

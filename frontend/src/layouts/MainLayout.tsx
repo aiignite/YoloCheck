@@ -18,6 +18,7 @@ import {
   UserOutlined,
   GlobalOutlined,
   DatabaseOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,6 +46,7 @@ const MainLayout: React.FC = () => {
     { key: '/mes', icon: <ScheduleOutlined />, label: t('menu.mes') },
     { key: '/models', icon: <AppstoreOutlined />, label: t('menu.models') },
     { key: '/batch-analysis', icon: <CloudServerOutlined />, label: t('menu.batchAnalysis') },
+    { key: '/dataset-audit', icon: <FileSearchOutlined />, label: t('menu.datasetAudit') || '数据集体检' },
     { key: '/alert-workflow', icon: <BellOutlined />, label: t('menu.alertWorkflow') },
     { key: '/storage', icon: <DatabaseOutlined />, label: t('menu.storage') },
     { key: '/users', icon: <TeamOutlined />, label: t('menu.users') },

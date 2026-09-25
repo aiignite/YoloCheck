@@ -71,7 +71,12 @@ class YOLOEngine:
     def is_loaded(self) -> bool:
         return self._model is not None
 
-    def predict(self, frame: np.ndarray, confidence: Optional[float] = None) -> FrameDetections:
+    def predict(
+        self,
+        frame: np.ndarray,
+        confidence: Optional[float] = None,
+        iou: Optional[float] = None,
+    ) -> FrameDetections:
         """对单帧进行推理"""
         if not self.is_loaded:
             raise RuntimeError("模型未加载，请先调用 load_model()")
@@ -80,12 +85,10 @@ class YOLOEngine:
         import time
         start = time.perf_counter()
 
-        results = self._model.predict(
-            source=frame,
-            conf=conf,
-            device=self.device,
-            verbose=False,
-        )
+        predict_kwargs = dict(source=frame, conf=conf, device=self.device, verbose=False)
+        if iou is not None:
+            predict_kwargs["iou"] = max(0.1, min(0.95, iou))
+        results = self._model.predict(**predict_kwargs)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -113,9 +116,14 @@ class YOLOEngine:
             frame_shape=frame.shape,
         )
 
-    def predict_batch(self, frames: list[np.ndarray], confidence: Optional[float] = None) -> list[FrameDetections]:
+    def predict_batch(
+        self,
+        frames: list[np.ndarray],
+        confidence: Optional[float] = None,
+        iou: Optional[float] = None,
+    ) -> list[FrameDetections]:
         """批量推理"""
-        return [self.predict(frame, confidence) for frame in frames]
+        return [self.predict(frame, confidence, iou) for frame in frames]
 
 
 # 全局引擎实例（可被多个模块共享）

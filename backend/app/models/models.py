@@ -59,6 +59,9 @@ class Alert(Base):
     camera_id = Column(String(50), index=True)
     acknowledged = Column(Boolean, default=False)
     acknowledged_by = Column(String(50))
+    status = Column(String(20), default="pending", index=True)  # pending / investigating / resolved
+    assigned_to = Column(String(50))
+    resolved_at = Column(DateTime)
     escalated = Column(Boolean, default=False)
     escalation_level = Column(SmallInteger, default=0)
     notification_sent = Column(Boolean, default=False)

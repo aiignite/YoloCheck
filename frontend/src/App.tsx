@@ -23,6 +23,7 @@ const AlertWorkflow = lazy(() => import('./pages/AlertWorkflow'));
 const StorageManage = lazy(() => import('./pages/StorageManage'));
 const Sessions = lazy(() => import('./pages/Sessions'));
 const LoginHistory = lazy(() => import('./pages/LoginHistory'));
+const DatasetAudit = lazy(() => import('./pages/DatasetAudit'));
 
 function PageFallback() {
   return (
@@ -59,6 +60,7 @@ function App() {
               <Route path="video-training" element={<VideoTraining />} />
               <Route path="video-training/evaluation" element={<VideoTrainingEvaluation />} />
               <Route path="batch-analysis" element={<BatchAnalysis />} />
+              <Route path="dataset-audit" element={<DatasetAudit />} />
               <Route path="alert-workflow" element={<AlertWorkflow />} />
               <Route path="storage" element={<StorageManage />} />
               <Route path="audit-logs" element={<AuditLogs />} />

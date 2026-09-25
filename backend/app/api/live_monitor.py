@@ -11,7 +11,7 @@ from urllib.parse import unquote
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -241,7 +241,9 @@ def _draw_detect_results(frame: np.ndarray, results) -> tuple[np.ndarray, list[d
     return annotated, detections_data
 
 
-def _process_frame_sync(frame: np.ndarray, mode: str = "pose", conf: float = 0.5) -> tuple[np.ndarray, list[dict], float]:
+def _process_frame_sync(
+    frame: np.ndarray, mode: str = "pose", conf: float = 0.5, iou: Optional[float] = None
+) -> tuple[np.ndarray, list[dict], float]:
     """同步处理单帧（在线程池中运行）"""
     start = time.perf_counter()
 
@@ -257,7 +259,10 @@ def _process_frame_sync(frame: np.ndarray, mode: str = "pose", conf: float = 0.5
     if model is None:
         return frame, [], 0.0
 
-    results = model.predict(source=frame, conf=conf, device="cpu", verbose=False)
+    predict_kwargs = dict(source=frame, conf=conf, device="cpu", verbose=False)
+    if iou is not None:
+        predict_kwargs["iou"] = max(0.1, min(0.95, iou))
+    results = model.predict(**predict_kwargs)
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     if mode == "pose":
@@ -272,7 +277,9 @@ def _process_frame_sync(frame: np.ndarray, mode: str = "pose", conf: float = 0.5
 # MJPEG流端点
 # ============================================================
 
-async def _generate_mjpeg(source: str | int, mode: str = "pose", conf: float = 0.5, fps: int = 10):
+async def _generate_mjpeg(
+    source: str | int, mode: str = "pose", conf: float = 0.5, fps: int = 10, iou: Optional[float] = None
+):
     """生成MJPEG流"""
     loop = asyncio.get_running_loop()
     interval = 1.0 / fps
@@ -301,7 +308,7 @@ async def _generate_mjpeg(source: str | int, mode: str = "pose", conf: float = 0
 
             # 在线程池中运行YOLO推理
             annotated, _, _ = await loop.run_in_executor(
-                _executor, _process_frame_sync, frame, mode, conf
+                _executor, _process_frame_sync, frame, mode, conf, iou
             )
 
             # 编码为JPEG
@@ -319,6 +326,7 @@ async def mjpeg_stream(
     camera_source: str,
     mode: str = Query("pose", description="检测模式: pose|detect"),
     conf: float = Query(0.5, ge=0.1, le=1.0),
+    iou: Optional[float] = Query(None, ge=0.1, le=0.95, description="NMS IoU阈值"),
     fps: int = Query(8, ge=1, le=30),
     user: User = Depends(require_auth),
 ):
@@ -334,7 +342,7 @@ async def mjpeg_stream(
         source = camera_source
 
     return StreamingResponse(
-        _generate_mjpeg(source, mode, conf, fps),
+        _generate_mjpeg(source, mode, conf, fps, iou),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
@@ -344,6 +352,7 @@ async def take_snapshot(
     camera_source: str,
     mode: str = Query("pose", description="检测模式: pose|detect"),
     conf: float = Query(0.5, ge=0.1, le=1.0),
+    iou: Optional[float] = Query(None, ge=0.1, le=0.95, description="NMS IoU阈值"),
     user: User = Depends(require_auth),
 ):
     """拍摄单帧快照（带检测标注）"""
@@ -363,7 +372,7 @@ async def take_snapshot(
         return {"error": "无法读取帧"}
 
     annotated, detections, inference_ms = await loop.run_in_executor(
-        _executor, _process_frame_sync, frame, mode, conf
+        _executor, _process_frame_sync, frame, mode, conf, iou
     )
 
     # 保存快照
@@ -424,6 +433,7 @@ async def ws_live_detection(
 
     mode = "pose"
     conf = 0.5
+    iou = None
     fps_target = 5
     frame_count = 0
     fps_start = time.time()
@@ -437,6 +447,7 @@ async def ws_live_detection(
                 if data.get("type") == "config":
                     mode = data.get("mode", mode)
                     conf = data.get("confidence", conf)
+                    iou = data.get("iou", iou)
                     fps_target = data.get("fps", fps_target)
                 elif data.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
@@ -450,7 +461,7 @@ async def ws_live_detection(
 
             # YOLO推理
             _, detections, inference_ms = await loop.run_in_executor(
-                _executor, _process_frame_sync, frame, mode, conf
+                _executor, _process_frame_sync, frame, mode, conf, iou
             )
 
             frame_count += 1
@@ -489,3 +500,45 @@ async def stop_stream(camera_source: str, _user: User = Depends(require_role("ma
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(_executor, _release_capture, source)
     return {"status": "stopped", "camera": camera_source}
+
+
+@router.post("/upload-snapshot")
+async def upload_snapshot(
+    snapshot: UploadFile = File(...),
+    user: User = Depends(require_auth),
+):
+    """保存前端本地抓拍（本地摄像头 getUserMedia 截帧）
+
+    前端 LiveMonitor 对本地摄像头使用 canvas 截帧后上传存证。
+    """
+    import os
+    from datetime import datetime
+
+    contents = await snapshot.read()
+    if not contents:
+        return {"error": "空文件"}
+    if len(contents) > 20 * 1024 * 1024:
+        return {"error": "文件过大（>20MB）"}
+
+    ext = ".jpg"
+    if snapshot.filename and "." in snapshot.filename:
+        suffix = snapshot.filename.rsplit(".", 1)[1].lower()
+        if suffix in ("jpg", "jpeg", "png"):
+            ext = f".{suffix}"
+
+    import numpy as _np
+    buf = _np.frombuffer(contents, dtype=_np.uint8)
+    frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    if frame is None:
+        return {"error": "无法解析图片"}
+
+    snap_dir = os.path.join(settings.upload_dir, "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+    filename = f"snapshot_local_{user.username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+    filepath = os.path.join(snap_dir, filename)
+    cv2.imwrite(filepath, frame)
+
+    return {
+        "snapshot_url": f"/uploads/snapshots/{filename}",
+        "timestamp": datetime.now().isoformat(),
+    }

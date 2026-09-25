@@ -15,6 +15,7 @@ from app.models.models import ActionCategory, ActionSampleSet, ActionSample, Tra
 from app.models.models import User, CameraDriver, SystemConfig, MESOrder, StorageRecord, AuditLog, AlertRule  # noqa
 from app.api import cameras, events, alerts, stats, websocket, video_learning, video_training
 from app.api import users, system, mes, reports, live_monitor, auth, models, batch_analysis, alert_workflow, pipeline, storage
+from app.api import dataset_audit
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.metrics_middleware import MetricsMiddleware
 from app.core import monitoring
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(alert_workflow.router, prefix="/api/alert-workflow", tags=["告警工作流"])
     app.include_router(pipeline.router, prefix="/api/pipeline", tags=["检测流水线"])
     app.include_router(storage.router, prefix="/api/storage", tags=["存储管理"])
+    app.include_router(dataset_audit.router, prefix="/api/dataset-audit", tags=["数据集体检"])
     app.include_router(monitoring.router, prefix="/api", tags=["系统监控"])
 
     # 静态文件
