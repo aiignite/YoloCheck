@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Select, Space, message, Card, Row, Col, Statistic, Tooltip } from 'antd';
-import { DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  ThunderboltOutlined,
+  AlertOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  ClockCircleOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import api from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -30,9 +38,23 @@ interface AlertStatsData {
 }
 
 const statusTag = (status: string, t: (k: string) => string) => {
-  if (status === 'resolved') return <Tag color="green">{t('pages.alerts.statusResolved')}</Tag>;
-  if (status === 'investigating') return <Tag color="orange">{t('pages.alerts.statusInvestigating')}</Tag>;
-  return <Tag color="red">{t('pages.alerts.statusPending')}</Tag>;
+  if (status === 'resolved')
+    return (
+      <Tag color="success" icon={<CheckCircleOutlined />}>
+        {t('pages.alerts.statusResolved')}
+      </Tag>
+    );
+  if (status === 'investigating')
+    return (
+      <Tag color="warning" icon={<ClockCircleOutlined />}>
+        {t('pages.alerts.statusInvestigating')}
+      </Tag>
+    );
+  return (
+    <Tag color="error" icon={<ExclamationCircleOutlined />}>
+      {t('pages.alerts.statusPending')}
+    </Tag>
+  );
 };
 
 const Alerts: React.FC = () => {
@@ -54,9 +76,9 @@ const Alerts: React.FC = () => {
         api.get('/alerts', { params }),
         api.get('/alerts/stats'),
       ]);
-      setAlerts(alertsRes.data);
+      setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : alertsRes.data?.items || []);
       setStats(statsRes.data);
-    } catch (e) {
+    } catch {
       message.error(t('pages.alerts.fetchFailed'));
     }
     setLoading(false);
@@ -69,27 +91,27 @@ const Alerts: React.FC = () => {
       await api.put(`/alerts/${id}/claim`, { assigned_to: user?.username || 'admin' });
       message.success(t('pages.alerts.claimed'));
       fetchData();
-    } catch (e) {
+    } catch {
       message.error(t('pages.alerts.actionFailed'));
     }
   };
 
   const handleResolve = async (id: number) => {
     try {
-      await api.put(`/alerts/${id}/resolve`, { resolved_by: user?.username || 'admin' });
-      message.success(t('pages.alerts.resolvedDone'));
+      await api.put(`/alerts/${id}/resolve`, {});
+      message.success(t('pages.alerts.resolved'));
       fetchData();
-    } catch (e) {
+    } catch {
       message.error(t('pages.alerts.actionFailed'));
     }
   };
 
   const handleClaimAll = async () => {
     try {
-      const res = await api.post('/alerts/claim-all');
-      message.success(t('pages.alerts.claimAllDone', { count: res.data.claimed_count }));
+      await api.post('/alerts/claim-all');
+      message.success(t('pages.alerts.claimAllSuccess'));
       fetchData();
-    } catch (e) {
+    } catch {
       message.error(t('pages.alerts.actionFailed'));
     }
   };
@@ -107,36 +129,75 @@ const Alerts: React.FC = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (e) {
+    } catch {
       message.error(t('pages.alerts.exportFailed'));
     }
   };
 
   const severityColor: Record<string, string> = {
-    critical: 'red', warning: 'orange', info: 'blue',
+    critical: 'red',
+    warning: 'orange',
+    info: 'blue',
   };
 
   const columns = [
     {
-      title: t('pages.alerts.level'), dataIndex: 'severity', width: 90,
-      render: (s: string) => <Tag color={severityColor[s]}>{s.toUpperCase()}</Tag>,
+      title: t('pages.alerts.level'),
+      dataIndex: 'severity',
+      width: 110,
+      render: (s: string) => (
+        <Tag color={severityColor[s]} style={{ fontWeight: 600 }}>
+          {s.toUpperCase()}
+        </Tag>
+      ),
     },
-    { title: t('alert.message'), dataIndex: 'message' },
-    { title: t('pages.alerts.camera'), dataIndex: 'camera_id', width: 100 },
     {
-      title: t('common.status'), dataIndex: 'status', width: 100,
+      title: t('alert.message'),
+      dataIndex: 'message',
+      render: (msg: string) => (
+        <span style={{ fontWeight: 500, color: 'rgba(0,0,0,0.85)' }}>{msg}</span>
+      ),
+    },
+    {
+      title: t('pages.alerts.camera'),
+      dataIndex: 'camera_id',
+      width: 140,
+      render: (cam: string) => (
+        <Tag color="geekblue" style={{ fontFamily: 'var(--mono)' }}>
+          {cam}
+        </Tag>
+      ),
+    },
+    {
+      title: t('common.status'),
+      dataIndex: 'status',
+      width: 120,
       render: (status: string) => statusTag(status || 'pending', t),
     },
     {
-      title: t('pages.alerts.assignee'), dataIndex: 'assigned_to', width: 100,
-      render: (v: string | null) => v || '-',
+      title: t('pages.alerts.assignee'),
+      dataIndex: 'assigned_to',
+      width: 120,
+      render: (v: string | null) => (
+        <Space size={4}>
+          <UserOutlined style={{ color: '#8c8c8c' }} />
+          <span>{v || '-'}</span>
+        </Space>
+      ),
     },
     {
-      title: t('pages.alerts.time'), dataIndex: 'created_at', width: 170,
-      render: (t: string) => new Date(t).toLocaleString(),
+      title: t('pages.alerts.time'),
+      dataIndex: 'created_at',
+      width: 180,
+      render: (t: string) => (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: '#8c8c8c' }}>
+          {new Date(t).toLocaleString()}
+        </span>
+      ),
     },
     {
-      title: t('common.actions'), width: 110,
+      title: t('common.actions'),
+      width: 120,
       render: (_: any, record: Alert) => {
         const status = record.status || 'pending';
         if (status === 'pending') {
@@ -153,51 +214,121 @@ const Alerts: React.FC = () => {
             </Button>
           );
         }
-        return <Tag color="green">{t('pages.alerts.closed')}</Tag>;
+        return <Tag color="success">{t('pages.alerts.closed')}</Tag>;
       },
     },
   ];
 
   return (
-    <div>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={4}><Card><Statistic title={t('pages.alerts.totalAlerts')} value={stats?.total ?? 0} /></Card></Col>
-        <Col span={4}><Card><Statistic title={t('alert.critical')} value={stats?.critical ?? 0} styles={{ content: { color: '#cf1322' } }} /></Card></Col>
-        <Col span={4}><Card><Statistic title={t('alert.warning')} value={stats?.warning ?? 0} styles={{ content: { color: '#faad14' } }} /></Card></Col>
-        <Col span={4}><Card><Statistic title={t('pages.alerts.statusPending')} value={stats?.pending ?? 0} styles={{ content: { color: '#cf1322' } }} /></Card></Col>
-        <Col span={4}><Card><Statistic title={t('pages.alerts.statusInvestigating')} value={stats?.investigating ?? 0} styles={{ content: { color: '#fa8c16' } }} /></Card></Col>
-        <Col span={4}><Card><Statistic title={t('pages.alerts.statusResolved')} value={stats?.resolved ?? 0} styles={{ content: { color: '#3f8600' } }} /></Card></Col>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Visual Metric Cards */}
+      <Row gutter={[16, 16]}>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('pages.alerts.totalAlerts')}
+              value={stats?.total ?? 0}
+              prefix={<AlertOutlined style={{ color: '#1890ff' }} />}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('alert.critical')}
+              value={stats?.critical ?? 0}
+              styles={{ content: { color: '#cf1322' } }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('alert.warning')}
+              value={stats?.warning ?? 0}
+              styles={{ content: { color: '#faad14' } }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('pages.alerts.statusPending')}
+              value={stats?.pending ?? 0}
+              styles={{ content: { color: '#cf1322' } }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('pages.alerts.statusInvestigating')}
+              value={stats?.investigating ?? 0}
+              styles={{ content: { color: '#fa8c16' } }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={4}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title={t('pages.alerts.statusResolved')}
+              value={stats?.resolved ?? 0}
+              styles={{ content: { color: '#3f8600' } }}
+            />
+          </Card>
+        </Col>
       </Row>
 
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Select
-          style={{ width: 140 }}
-          placeholder={t('pages.alerts.filterLevel')}
-          allowClear
-          onChange={(v) => setFilterSeverity(v)}
-        >
-          <Select.Option value="critical">Critical</Select.Option>
-          <Select.Option value="warning">Warning</Select.Option>
-          <Select.Option value="info">Info</Select.Option>
-        </Select>
-        <Select
-          style={{ width: 140 }}
-          placeholder={t('pages.alerts.filterStatus')}
-          allowClear
-          value={filterStatus}
-          onChange={(v) => setFilterStatus(v)}
-        >
-          <Select.Option value="pending">{t('pages.alerts.statusPending')}</Select.Option>
-          <Select.Option value="investigating">{t('pages.alerts.statusInvestigating')}</Select.Option>
-          <Select.Option value="resolved">{t('pages.alerts.statusResolved')}</Select.Option>
-        </Select>
-        <Tooltip title={t('pages.alerts.claimAllTip')}>
-          <Button icon={<ThunderboltOutlined />} onClick={handleClaimAll}>{t('pages.alerts.claimAll')}</Button>
-        </Tooltip>
-        <Button icon={<DownloadOutlined />} onClick={handleExportCsv}>{t('pages.alerts.exportCsv')}</Button>
-      </Space>
-
-      <Table columns={columns} dataSource={alerts} rowKey="id" loading={loading} />
+      {/* Main Alert Records Card */}
+      <Card
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertOutlined style={{ color: '#ff4d4f' }} />
+            <span>产线缺陷与安防预警闭环工单库</span>
+          </div>
+        }
+        extra={
+          <Space wrap>
+            <Select
+              style={{ width: 130 }}
+              placeholder={t('pages.alerts.filterLevel')}
+              allowClear
+              onChange={(v) => setFilterSeverity(v)}
+            >
+              <Select.Option value="critical">Critical (严重)</Select.Option>
+              <Select.Option value="warning">Warning (警告)</Select.Option>
+              <Select.Option value="info">Info (提示)</Select.Option>
+            </Select>
+            <Select
+              style={{ width: 130 }}
+              placeholder={t('pages.alerts.filterStatus')}
+              allowClear
+              value={filterStatus}
+              onChange={(v) => setFilterStatus(v)}
+            >
+              <Select.Option value="pending">{t('pages.alerts.statusPending')}</Select.Option>
+              <Select.Option value="investigating">{t('pages.alerts.statusInvestigating')}</Select.Option>
+              <Select.Option value="resolved">{t('pages.alerts.statusResolved')}</Select.Option>
+            </Select>
+            <Tooltip title={t('pages.alerts.claimAllTip')}>
+              <Button icon={<ThunderboltOutlined />} onClick={handleClaimAll}>
+                {t('pages.alerts.claimAll')}
+              </Button>
+            </Tooltip>
+            <Button icon={<DownloadOutlined />} onClick={handleExportCsv}>
+              {t('pages.alerts.exportCsv')}
+            </Button>
+          </Space>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={alerts}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条告警工单` }}
+        />
+      </Card>
     </div>
   );
 };

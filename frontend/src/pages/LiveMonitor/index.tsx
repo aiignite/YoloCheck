@@ -24,12 +24,29 @@ import {
   CompressOutlined,
   BellOutlined,
   VideoCameraOutlined,
+  ThunderboltOutlined,
+  ScanOutlined,
+  SafetyCertificateOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import api from '../../utils/api';
+import { DetectionOverlay } from '../../components/DetectionOverlay';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-const WS_BASE = API_BASE.replace(/^http/, 'ws').replace(/\/api$/, '');
+const getApiBase = () => {
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+  if (typeof window !== 'undefined') return `${window.location.origin}/api`;
+  return '/api';
+};
+const getWsBase = () => {
+  if (typeof window !== 'undefined') {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}`;
+  }
+  return 'ws://localhost:3000';
+};
+const API_BASE = getApiBase();
+const WS_BASE = getWsBase();
 
 interface LocalCamera {
   index: number;
@@ -350,6 +367,9 @@ const LiveMonitor: React.FC = () => {
               }}
             />
           )}
+          {stats && stats.detections && stats.detections.length > 0 && (
+            <DetectionOverlay detections={stats.detections} width={640} height={480} />
+          )}
           {stats && stats.detections.length > 0 && (
             <div style={{
               position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -431,6 +451,41 @@ const LiveMonitor: React.FC = () => {
           </Col>
           <Col>
             <Space>
+              <Button
+                style={{ background: '#f6ffed', borderColor: '#b7eb8f', color: '#52c41a' }}
+                icon={<ThunderboltOutlined />}
+                onClick={() => window.location.href = '/model-optimizer'}
+              >
+                ⚡ 推理加速：INT8 Turbo (18ms)
+              </Button>
+              <Button
+                style={{ background: '#e6f7ff', borderColor: '#91d5ff', color: '#1890ff' }}
+                icon={<ScanOutlined />}
+                onClick={() => window.location.href = '/image-lab'}
+              >
+                🔬 SAHI切片
+              </Button>
+              <Button
+                style={{ background: '#f9f0ff', borderColor: '#d3adf7', color: '#722ed1' }}
+                icon={<SafetyCertificateOutlined />}
+                onClick={() => window.location.href = '/supervision-lab'}
+              >
+                🛡️ Supervision业务流
+              </Button>
+              <Button
+                style={{ background: '#fff7e6', borderColor: '#ffd591', color: '#fa8c16' }}
+                icon={<ExperimentOutlined />}
+                onClick={() => window.location.href = '/solder-lab'}
+              >
+                🛠️ SMT焊接质检
+              </Button>
+              <Button
+                style={{ background: '#e6f7ff', borderColor: '#91d5ff', color: '#096dd9' }}
+                icon={<SafetyCertificateOutlined />}
+                onClick={() => window.location.href = '/wave-solder-lab'}
+              >
+                🌊 波峰焊评价
+              </Button>
               <Tooltip title={t('pages.liveMonitor.detectionNotify')}>
                 <Switch
                   checkedChildren={<BellOutlined />}

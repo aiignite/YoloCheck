@@ -686,22 +686,22 @@ export default function VideoTraining() {
             <Card size="small" title="关键指标">
               <Row gutter={16}>
                 <Col span={4}>
-                  <Statistic title="mAP50" value={selectedJobDetail.runtime_summary.map50 ?? '-'} suffix={selectedJobDetail.runtime_summary.map50 != null ? '%' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="mAP50" value={selectedJobDetail.runtime_summary.map50 ?? '-'} suffix={selectedJobDetail.runtime_summary.map50 != null ? '%' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="Accuracy" value={selectedJobDetail.runtime_summary.accuracy != null ? (selectedJobDetail.runtime_summary.accuracy * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.accuracy != null ? '%' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="Accuracy" value={selectedJobDetail.runtime_summary.accuracy != null ? (selectedJobDetail.runtime_summary.accuracy * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.accuracy != null ? '%' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="Precision" value={selectedJobDetail.runtime_summary.precision != null ? (selectedJobDetail.runtime_summary.precision * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.precision != null ? '%' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="Precision" value={selectedJobDetail.runtime_summary.precision != null ? (selectedJobDetail.runtime_summary.precision * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.precision != null ? '%' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="Recall" value={selectedJobDetail.runtime_summary.recall != null ? (selectedJobDetail.runtime_summary.recall * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.recall != null ? '%' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="Recall" value={selectedJobDetail.runtime_summary.recall != null ? (selectedJobDetail.runtime_summary.recall * 100).toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.recall != null ? '%' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="mAP50-95" value={selectedJobDetail.runtime_summary.map50_95 ?? '-'} suffix={selectedJobDetail.runtime_summary.map50_95 != null ? '%' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="mAP50-95" value={selectedJobDetail.runtime_summary.map50_95 ?? '-'} suffix={selectedJobDetail.runtime_summary.map50_95 != null ? '%' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="推理速度" value={selectedJobDetail.runtime_summary.inference_speed != null ? selectedJobDetail.runtime_summary.inference_speed.toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.inference_speed != null ? 'ms' : ''} valueStyle={{ fontSize: 20 }} />
+                  <Statistic title="推理速度" value={selectedJobDetail.runtime_summary.inference_speed != null ? selectedJobDetail.runtime_summary.inference_speed.toFixed(1) : '-'} suffix={selectedJobDetail.runtime_summary.inference_speed != null ? 'ms' : ''} styles={{ content: { fontSize: 20 } }} />
                 </Col>
               </Row>
             </Card>

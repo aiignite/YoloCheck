@@ -24,6 +24,11 @@ const StorageManage = lazy(() => import('./pages/StorageManage'));
 const Sessions = lazy(() => import('./pages/Sessions'));
 const LoginHistory = lazy(() => import('./pages/LoginHistory'));
 const DatasetAudit = lazy(() => import('./pages/DatasetAudit'));
+const ModelOptimizer = lazy(() => import('./pages/ModelOptimizer'));
+const AdvancedImageLab = lazy(() => import('./pages/AdvancedImageLab'));
+const SupervisionLab = lazy(() => import('./pages/SupervisionLab'));
+const SolderInspectionLab = lazy(() => import('./pages/SolderInspectionLab'));
+const WaveSolderInspectionLab = lazy(() => import('./pages/WaveSolderInspectionLab'));
 
 function PageFallback() {
   return (
@@ -57,6 +62,11 @@ function App() {
               <Route path="users" element={<Users />} />
               <Route path="mes" element={<MES />} />
               <Route path="models" element={<ModelManager />} />
+              <Route path="model-optimizer" element={<ModelOptimizer />} />
+              <Route path="image-lab" element={<AdvancedImageLab />} />
+              <Route path="supervision-lab" element={<SupervisionLab />} />
+              <Route path="solder-lab" element={<SolderInspectionLab />} />
+              <Route path="wave-solder-lab" element={<WaveSolderInspectionLab />} />
               <Route path="video-training" element={<VideoTraining />} />
               <Route path="video-training/evaluation" element={<VideoTrainingEvaluation />} />
               <Route path="batch-analysis" element={<BatchAnalysis />} />

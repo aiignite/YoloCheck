@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Select, Card, Statistic, Popconfirm, message, Space, Row, Col, Tag, Button } from 'antd';
-import { DeleteOutlined, DatabaseOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Table, Select, Card, Statistic, Popconfirm, message, Space, Row, Col, Tag, Button, Tooltip } from 'antd';
+import {
+  DeleteOutlined,
+  DatabaseOutlined,
+  FileTextOutlined,
+  ReloadOutlined,
+  CloudServerOutlined,
+  PieChartOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import api from '../../utils/api';
 
@@ -23,7 +30,7 @@ interface StorageStats {
 }
 
 function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
+  if (!bytes || bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
@@ -51,7 +58,7 @@ const StorageManage: React.FC = () => {
         api.get('/storage', { params }),
         api.get('/storage/stats'),
       ]);
-      setRecords(recordsRes.data);
+      setRecords(Array.isArray(recordsRes.data) ? recordsRes.data : recordsRes.data.items || []);
       setStats(statsRes.data);
     } catch {
       message.error(t('pages.storage.fetchFailed'));
@@ -59,7 +66,9 @@ const StorageManage: React.FC = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, [fileTypeFilter]);
+  useEffect(() => {
+    fetchData();
+  }, [fileTypeFilter]);
 
   const handleDelete = async (id: number) => {
     try {
@@ -73,121 +82,131 @@ const StorageManage: React.FC = () => {
 
   const columns = [
     {
-      title: 'ID',
+      title: '存储文件 ID',
       dataIndex: 'id',
-      width: 70,
+      width: 120,
+      render: (id: number) => (
+        <span style={{ fontFamily: 'var(--mono)', color: '#096dd9', fontWeight: 600 }}>
+          #{id}
+        </span>
+      ),
     },
     {
       title: t('pages.storage.fileType'),
       dataIndex: 'file_type',
-      width: 100,
-      render: (t: string) => <Tag color={fileTypeColors[t] || 'default'}>{t}</Tag>,
+      width: 120,
+      render: (type: string) => (
+        <Tag color={fileTypeColors[type] || 'default'} style={{ fontWeight: 600 }}>
+          {type.toUpperCase()}
+        </Tag>
+      ),
     },
     {
       title: t('pages.storage.filePath'),
       dataIndex: 'file_path',
       ellipsis: true,
+      render: (path: string) => (
+        <Tooltip title={path}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: '#595959' }}>
+            {path}
+          </span>
+        </Tooltip>
+      ),
     },
     {
       title: t('pages.storage.fileSize'),
       dataIndex: 'file_size',
       width: 120,
-      render: (size: number | null) => size != null ? formatSize(size) : '-',
+      render: (size: number | null) => (
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>
+          {size !== null ? formatSize(size) : '-'}
+        </span>
+      ),
     },
     {
-      title: t('pages.storage.relatedType'),
-      dataIndex: 'related_type',
-      width: 100,
-      render: (t: string | null) => t || '-',
+      title: t('pages.storage.mimeType'),
+      dataIndex: 'mime_type',
+      width: 140,
+      render: (mime: string | null) => (
+        <Tag>{mime || 'application/octet-stream'}</Tag>
+      ),
     },
     {
-      title: t('pages.storage.relatedId'),
-      dataIndex: 'related_id',
-      width: 80,
-      render: (id: number | null) => id ?? '-',
-    },
-    {
-      title: t('pages.storage.description'),
-      dataIndex: 'description',
-      ellipsis: true,
-      render: (d: string | null) => d || '-',
-    },
-    {
-      title: t('common.createdAt'),
+      title: t('pages.storage.createdAt'),
       dataIndex: 'created_at',
-      width: 170,
-      render: (t: string) => new Date(t).toLocaleString(),
+      width: 180,
+      render: (date: string) => (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: '#8c8c8c' }}>
+          {new Date(date).toLocaleString()}
+        </span>
+      ),
     },
     {
       title: t('common.actions'),
-      width: 80,
-      render: (_: unknown, record: StorageRecord) => (
+      width: 100,
+      render: (_: any, record: StorageRecord) => (
         <Popconfirm
           title={t('pages.storage.confirmDelete')}
-          description={t('pages.storage.confirmDeleteDesc')}
+          okText={t('common.confirm') || '确定'}
+          cancelText={t('common.cancel') || '取消'}
+          okType="danger"
           onConfirm={() => handleDelete(record.id)}
-          okText={t('common.delete')}
-          cancelText={t('common.cancel')}
         >
-          <Button size="small" danger icon={<DeleteOutlined />} />
+          <Button size="small" danger icon={<DeleteOutlined />}>
+            {t('common.delete')}
+          </Button>
         </Popconfirm>
       ),
     },
   ];
 
   return (
-    <div>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}>
-          <Card>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Top Metric Cards */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={8}>
+          <Card className="industrial-metric-card" size="small">
             <Statistic
               title={t('pages.storage.totalFiles')}
               value={stats?.total_files ?? 0}
-              prefix={<DatabaseOutlined />}
+              prefix={<DatabaseOutlined style={{ color: '#1890ff' }} />}
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card>
+        <Col xs={24} sm={8}>
+          <Card className="industrial-metric-card" size="small">
             <Statistic
               title={t('pages.storage.totalSize')}
               value={stats?.total_size ?? 0}
               formatter={(val) => formatSize(val as number)}
-              prefix={<FileTextOutlined />}
+              prefix={<CloudServerOutlined style={{ color: '#52c41a' }} />}
+              styles={{ content: { color: '#389e0d' } }}
             />
           </Card>
         </Col>
-        <Col span={8}>
-          <Card>
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-              <Statistic title={t('pages.storage.typeFilter')} value="-" />
-              <Select
-                allowClear
-                placeholder={t('pages.storage.allTypes')}
-                style={{ width: 140 }}
-                value={fileTypeFilter}
-                onChange={setFileTypeFilter}
-                options={[
-                  { value: 'image', label: t('pages.storage.typeImage') },
-                  { value: 'video', label: t('pages.storage.typeVideo') },
-                  { value: 'model', label: t('pages.storage.typeModel') },
-                  { value: 'keyframe', label: t('pages.storage.typeKeyframe') },
-                ]}
-              />
-            </Space>
+        <Col xs={24} sm={8}>
+          <Card className="industrial-metric-card" size="small">
+            <Statistic
+              title="存储引擎架构"
+              value="本地高速 SSD / 分布式挂载"
+              prefix={<PieChartOutlined style={{ color: '#722ed1' }} />}
+              styles={{ content: { fontSize: 18 } }}
+            />
           </Card>
         </Col>
       </Row>
 
+      {/* Subcategory breakdown cards */}
       {stats?.by_type && stats.by_type.length > 0 && (
-        <Row gutter={12} style={{ marginBottom: 16 }}>
+        <Row gutter={[16, 16]}>
           {stats.by_type.map((item) => (
-            <Col key={item.file_type} span={6}>
-              <Card size="small">
+            <Col key={item.file_type} xs={12} sm={6}>
+              <Card className="industrial-metric-card" size="small">
                 <Statistic
-                  title={item.file_type}
+                  title={`${item.file_type.toUpperCase()} 资源`}
                   value={item.count}
-                  suffix={`${t('pages.storage.countUnit')} / ${formatSize(item.total_size)}`}
+                  suffix={`件 / ${formatSize(item.total_size)}`}
+                  prefix={<FileTextOutlined style={{ color: fileTypeColors[item.file_type] || '#1890ff' }} />}
                 />
               </Card>
             </Col>
@@ -195,13 +214,47 @@ const StorageManage: React.FC = () => {
         </Row>
       )}
 
-      <Table
-        columns={columns}
-        dataSource={records}
-        rowKey="id"
-        loading={loading}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('common.total', { count: total }) }}
-      />
+      {/* Main Table Card */}
+      <Card
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <DatabaseOutlined style={{ color: '#1890ff' }} />
+            <span>质检快照、视频样本与模型介质持久化库</span>
+          </div>
+        }
+        extra={
+          <Space>
+            <Select
+              allowClear
+              placeholder={t('pages.storage.allTypes')}
+              style={{ width: 150 }}
+              value={fileTypeFilter}
+              onChange={setFileTypeFilter}
+              options={[
+                { value: 'image', label: t('pages.storage.typeImage') },
+                { value: 'video', label: t('pages.storage.typeVideo') },
+                { value: 'model', label: t('pages.storage.typeModel') },
+                { value: 'keyframe', label: t('pages.storage.typeKeyframe') },
+              ]}
+            />
+            <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
+              刷新
+            </Button>
+          </Space>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={records}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            pageSize: 15,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 个存储资产`,
+          }}
+        />
+      </Card>
     </div>
   );
 };

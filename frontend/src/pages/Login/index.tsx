@@ -261,7 +261,7 @@ const Login: React.FC = () => {
                 {t('auth.rememberMe') || '记住我'}
               </Checkbox>
             </div>
-            <Form.Item style={{ marginBottom: 16 }}>
+            <Form.Item style={{ marginBottom: 12 }}>
               <Button
                 type="primary"
                 htmlType="submit"
@@ -279,6 +279,39 @@ const Login: React.FC = () => {
                 {t('auth.loginButton')}
               </Button>
             </Form.Item>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <Button
+                size="small"
+                style={{ flex: 1, fontSize: 12, background: '#e6f7ff', borderColor: '#91d5ff', color: '#096dd9' }}
+                onClick={() => {
+                  form.setFieldsValue({ username: 'admin', password: 'password' });
+                  form.submit();
+                }}
+              >
+                ⚡ 管理员一键登入
+              </Button>
+              <Button
+                size="small"
+                style={{ flex: 1, fontSize: 12 }}
+                onClick={() => {
+                  form.setFieldsValue({ username: 'manager', password: 'password' });
+                  form.submit();
+                }}
+              >
+                产线主管
+              </Button>
+              <Button
+                size="small"
+                style={{ flex: 1, fontSize: 12 }}
+                onClick={() => {
+                  form.setFieldsValue({ username: 'operator', password: 'password' });
+                  form.submit();
+                }}
+              >
+                质检操作员
+              </Button>
+            </div>
           </Form>
 
           <p style={{

@@ -299,9 +299,9 @@ const DatasetAudit: React.FC = () => {
     <div>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.totalLines')} value={summary?.total ?? 0} prefix={<FileTextOutlined />} /></Card></Col>
-        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.validLines')} value={summary?.valid ?? 0} valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} /></Card></Col>
-        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.errorLines')} value={summary?.errors ?? 0} valueStyle={{ color: '#cf1322' }} /></Card></Col>
-        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.warningLines')} value={summary?.warnings ?? 0} valueStyle={{ color: '#faad14' }} /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.validLines')} value={summary?.valid ?? 0} styles={{ content: { color: '#3f8600' } }} prefix={<CheckCircleOutlined />} /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.errorLines')} value={summary?.errors ?? 0} styles={{ content: { color: '#cf1322' } }} /></Card></Col>
+        <Col span={6}><Card size="small"><Statistic title={t('pages.datasetAudit.warningLines')} value={summary?.warnings ?? 0} styles={{ content: { color: '#faad14' } }} /></Card></Col>
       </Row>
 
       {summary?.blocked && (
@@ -480,9 +480,9 @@ const DatasetAudit: React.FC = () => {
         </Card>
       </Col>
       <Col span={8}>
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        <Space orientation="vertical" style={{ width: '100%' }} size={16}>
           <Card size="small" title={t('pages.datasetAudit.filtersTitle')}>
-            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={12}>
               <div>
                 <div style={{ fontSize: 12, marginBottom: 4 }}>
                   {t('pages.datasetAudit.confLabel')}: {(confThreshold * 100).toFixed(0)}%
@@ -521,7 +521,7 @@ const DatasetAudit: React.FC = () => {
                 title={t('pages.datasetAudit.selectedBox')}
                 extra={<Button size="small" danger onClick={() => deleteBox(b.lineIndex)}>{t('pages.datasetAudit.deleteBox')}</Button>}
               >
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                   <Tag color={classColor(b.classId)}>{t('pages.datasetAudit.class')} {b.classId}</Tag>
                   <span style={{ fontSize: 12 }}>conf: {(b.confidence * 100).toFixed(1)}%</span>
                   <span style={{ fontFamily: 'monospace', fontSize: 12 }}>

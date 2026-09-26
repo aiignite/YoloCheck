@@ -197,7 +197,7 @@ export default function VideoTrainingEvaluation() {
                     title: '模型',
                     key: 'model',
                     render: (_, record: EvaluationItem) => (
-                      <Space direction="vertical" size={0}>
+                      <Space orientation="vertical" size={0}>
                         <strong>{record.model.name}</strong>
                         <Typography.Text type="secondary">{record.job?.name || '-'}</Typography.Text>
                       </Space>

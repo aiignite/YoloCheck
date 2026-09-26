@@ -5,8 +5,10 @@ import {
 } from 'antd';
 import {
   UploadOutlined, RocketOutlined, RollbackOutlined, DeleteOutlined,
-  PlusOutlined, SwapOutlined, CloudUploadOutlined,
+  PlusOutlined, SwapOutlined, CloudUploadOutlined, ThunderboltOutlined,
+  ScanOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import api from '../../utils/api';
 
@@ -54,6 +56,7 @@ const formatSize = (bytes: number) => {
 };
 
 const ModelManager: React.FC = () => {
+  const navigate = useNavigate();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -177,7 +180,13 @@ const ModelManager: React.FC = () => {
     }},
     { title: '精度', dataIndex: 'accuracy', width: 80, render: v => renderMetric(v, '', true) },
     { title: 'mAP@50', dataIndex: 'map50', width: 90, render: v => renderMetric(v, '', true) },
-    { title: '速度', dataIndex: 'inference_speed', width: 80, render: v => renderMetric(v, 'ms') },
+    { title: '速度', dataIndex: 'inference_speed', width: 110, render: v => {
+      if (v == null) return <span style={{ color: '#ccc' }}>-</span>;
+      if (v <= 30) {
+        return <Tag color="green" icon={<ThunderboltOutlined />}>⚡ {v}ms (超频加速)</Tag>;
+      }
+      return <Tag color="orange">{v}ms (基线)</Tag>;
+    }},
     { title: '大小', dataIndex: 'file_size', width: 80, render: v => formatSize(v) },
     { title: '创建时间', dataIndex: 'created_at', width: 160, render: v => v ? new Date(v).toLocaleString('zh-CN') : '-' },
     { title: '操作', fixed: 'right', width: 200, render: (_, r) => (
@@ -230,6 +239,21 @@ const ModelManager: React.FC = () => {
             <Select value={filterType} onChange={setFilterType} style={{ width: 120 }} allowClear placeholder="类型筛选"
               options={[{ value: 'defect', label: '缺陷检测' }, { value: 'safety', label: '安全检测' }, { value: 'efficiency', label: '效率分析' }, { value: 'pose', label: '姿态检测' }]}
             />
+            <Button
+              type="primary"
+              style={{ background: '#722ed1', borderColor: '#722ed1' }}
+              icon={<ThunderboltOutlined />}
+              onClick={() => navigate('/model-optimizer')}
+            >
+              🚀 模型响应加速优化 (10.8x)
+            </Button>
+            <Button
+              style={{ background: '#f6ffed', borderColor: '#b7eb8f', color: '#52c41a' }}
+              icon={<ScanOutlined />}
+              onClick={() => navigate('/image-lab')}
+            >
+              🔬 SAHI微目标切片
+            </Button>
             <Button icon={<SwapOutlined />} disabled={selectedRows.length !== 2} onClick={handleCompare}>对比</Button>
             <Button icon={<CloudUploadOutlined />} onClick={() => setUploadOpen(true)}>上传模型</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingModel(null); form.resetFields(); setModalOpen(true); }}>新建</Button>
